@@ -1,0 +1,48 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/checkpoint_and_continue_hook.sh UserPromptSubmit",
+            "statusMessage": "Checking checkpoint-and-continue threshold"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/checkpoint_and_continue_hook.sh PreToolUse",
+            "statusMessage": "Checking checkpoint-and-continue write authority"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/checkpoint_and_continue_hook.sh PreCompact",
+            "statusMessage": "Writing checkpoint-and-continue checkpoint"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/checkpoint_and_continue_hook.sh Stop",
+            "statusMessage": "Preserving checkpoint-and-continue state"
+          }
+        ]
+      }
+    ]
+  }
+}

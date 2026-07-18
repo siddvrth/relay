@@ -1,0 +1,37 @@
+{
+  "name": "fresh-handoff",
+  "version": "0.2.0",
+  "description": "Create bounded, acknowledgement-gated handoffs for session-safe continuation of long-running Codex work.",
+  "author": {
+    "name": "siddvrth",
+    "url": "https://github.com/siddvrth"
+  },
+  "homepage": "https://github.com/siddvrth/fresh-handoff#readme",
+  "repository": "https://github.com/siddvrth/fresh-handoff",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "continuity",
+    "checkpoint",
+    "handoff",
+    "context"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Fresh Handoff",
+    "shortDescription": "Bounded clean-task handoffs for Codex",
+    "longDescription": "Write a bounded session-scoped capsule, verify exact transfer identity in a clean Codex task, and acknowledge before single-writer ownership transfers without inheriting the old conversation.",
+    "developerName": "siddvrth",
+    "websiteURL": "https://github.com/siddvrth/fresh-handoff",
+    "category": "Productivity",
+    "capabilities": [
+      "Write",
+      "Automation"
+    ],
+    "defaultPrompt": [
+      "Checkpoint this task with a self-contained session revision and report readiness.",
+      "Resume from the exact delivered path, SHA-256, source, transfer, goal, revision, and nonce; acknowledge before implementation.",
+      "Evaluate handoff quality and token efficiency without claiming improvement before the paired gate passes."
+    ]
+  }
+}

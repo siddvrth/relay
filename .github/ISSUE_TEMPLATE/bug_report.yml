@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a runtime, hook, validation, or documentation problem.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Skill / Python scripts
+        - Codex App handoff
+        - Codex CLI / OMX hook
+        - Installation / audit
+        - Documentation
+        - Artifacts / privacy
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation output
+      description: Include sanitized output from validate, audit, or completion gate.
+      render: shell

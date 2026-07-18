@@ -1,0 +1,4 @@
+interface:
+  display_name: "Checkpoint and Continue"
+  short_description: "Bounded, session-safe Codex handoffs"
+  default_prompt: "Use $checkpoint-and-continue to write or refresh a bounded handoff capsule. Verify the exact delivered path, SHA-256, source, transfer, goal, revision, and nonce; acknowledge before ownership transfer, then wait for can_continue:true before implementation."

@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "release_mode": "experimental_non_claim",
+  "token_efficiency_claim": false,
+  "cost_savings_claim": false
+}

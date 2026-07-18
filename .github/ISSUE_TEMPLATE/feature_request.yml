@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose a host integration, runtime behavior, or documentation improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Runtime behavior
+        - Host integration
+        - Documentation
+        - Validation
+        - Artifact hygiene
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What gap does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the smallest useful change.
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: Preserves the 30% threshold contract
+        - label: Does not require committing raw runtime state
+        - label: Keeps host-specific behavior at the integration edge

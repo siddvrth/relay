@@ -1,0 +1,29 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate package
+        run: bash validate.sh
+      - name: Install generated repository surfaces
+        run: bash install.sh .
+      - name: Audit self install
+        run: bash audit_install.sh .
+      - name: Completion gate
+        run: bash completion_gate.sh .
+      - name: Release readiness
+        run: python3 scripts/check_release_readiness.py

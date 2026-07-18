@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local runtime state
+.omx/
+.agents/
+
+# OS/editor noise
+.DS_Store
