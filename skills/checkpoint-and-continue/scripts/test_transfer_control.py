@@ -124,6 +124,58 @@ class TransferControlTests(unittest.TestCase):
         paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
         self.assertEqual(len(list(paths.transfers.glob("*.json"))), 1)
 
+    def test_bool_revision_direct_identity_is_rejected_while_integer_one_completes(self) -> None:
+        with self.assertRaises(transfer_control.TransferError) as prepare_error:
+            self.prepare(revision=True)
+        self.assertEqual(prepare_error.exception.code, "invalid_identity")
+
+        prepared = self.prepare()
+        transfer_id = str(prepared["transfer_id"])
+        self.launch_and_start(transfer_id)
+        exact = self.exact(transfer_id)
+        bool_exact = {**exact, "capsule_revision": True}
+
+        with self.assertRaises(transfer_control.TransferError) as verify_error:
+            transfer_control.verify(
+                self.repo,
+                **bool_exact,
+                repository_inspected=True,
+                goal_inspected=True,
+                exact_next_action=self.NEXT_ACTION,
+                resume_validation_command=self.VALIDATION_COMMAND,
+                resume_validation_expected=self.VALIDATION_EXPECTED,
+            )
+        self.assertEqual(verify_error.exception.code, "invalid_identity")
+
+        self.verify(transfer_id)
+        with self.assertRaises(transfer_control.TransferError) as ack_error:
+            transfer_control.acknowledge(self.repo, **bool_exact)
+        self.assertEqual(ack_error.exception.code, "invalid_identity")
+        acknowledged = transfer_control.acknowledge(self.repo, **exact)
+        self.assertEqual(acknowledged["phase"], "acknowledged")
+
+    def test_bool_revision_persisted_record_and_ownership_fail_closed(self) -> None:
+        transfer_id, exact = self.ready_for_ack()
+        paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
+        record_path = paths.transfers / f"{transfer_id}.json"
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        record["capsule_revision"] = True
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+
+        with self.assertRaises(transfer_control.TransferError) as record_error:
+            transfer_control.status(self.repo, source_session_id=self.SOURCE)
+        self.assertEqual(record_error.exception.code, "corrupt_state")
+
+        record["capsule_revision"] = 1
+        transfer_control.durable_write_json(record_path, record)
+        transfer_control.acknowledge(self.repo, **exact)
+        ownership = json.loads(paths.ownership.read_text(encoding="utf-8"))
+        ownership["capsule_revision"] = True
+        transfer_control.durable_write_json(paths.ownership, ownership)
+        with self.assertRaises(transfer_control.TransferError) as ownership_error:
+            transfer_control.status(self.repo, source_session_id=self.SOURCE)
+        self.assertEqual(ownership_error.exception.code, "corrupt_ownership")
+
     def test_resume_validation_mismatch_fails_then_exact_values_persist_idempotently(self) -> None:
         prepared = transfer_control.prepare(
             self.repo,

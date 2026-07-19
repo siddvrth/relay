@@ -367,7 +367,7 @@ def _validate_record(paths: TransferPaths, record: Mapping[str, Any]) -> None:
     if session_scope(str(record["source_session_id"])) != paths.source_scope:
         raise TransferError("corrupt_state", "transfer record source session/scope mismatch")
     revision = record.get("capsule_revision")
-    if not isinstance(revision, int) or revision < 1:
+    if type(revision) is not int or revision < 1:
         raise TransferError("corrupt_state", "transfer record has invalid revision")
     try:
         nonce = _validate_nonce(str(record["nonce"]))
@@ -492,11 +492,44 @@ def _clear_failure(record: dict[str, Any], *codes: str) -> None:
 
 def _ownership_can_continue(ownership: Mapping[str, Any]) -> bool:
     stop = ownership.get("source_stop")
-    if not isinstance(stop, dict):
+    if (
+        not isinstance(stop, dict)
+        or stop.get("requested") is not True
+        or stop.get("capability") not in STOP_CAPABILITIES
+        or stop.get("enforced_read_only") is not True
+    ):
         return False
+    retry_count = stop.get("retry_count")
+    retry_limit = stop.get("retry_limit")
+    if (
+        type(retry_count) is not int
+        or type(retry_limit) is not int
+        or retry_limit != 3
+        or not 0 <= retry_count <= retry_limit
+    ):
+        return False
+    result = stop.get("result")
+    if result in PENDING_STOP_RESULTS:
+        return bool(
+            stop.get("termination_pending") is True
+            and stop.get("observed_quiesced") is False
+            and stop.get("adapter_evidence") is None
+        )
+    evidence = stop.get("adapter_evidence")
+    expected_kind = FINAL_STOP_EVIDENCE.get(
+        (str(stop.get("capability", "")), str(result))
+    )
     return bool(
-        stop.get("observed_quiesced")
-        or (stop.get("termination_pending") and stop.get("enforced_read_only"))
+        result in FINAL_STOP_RESULTS
+        and stop.get("termination_pending") is False
+        and stop.get("observed_quiesced") is True
+        and expected_kind is not None
+        and isinstance(evidence, dict)
+        and evidence.get("kind") == expected_kind
+        and isinstance(evidence.get("reference"), str)
+        and evidence["reference"]
+        and isinstance(evidence.get("recorded_at"), str)
+        and evidence["recorded_at"]
     )
 
 
@@ -533,7 +566,7 @@ def prepare(
 ) -> dict[str, Any]:
     source_session_id = _require_text("source session ID", source_session_id)
     goal_identity = _require_text("goal identity", goal_identity)
-    if capsule_revision < 1:
+    if type(capsule_revision) is not int or capsule_revision < 1:
         raise TransferError("invalid_identity", "capsule revision must be positive")
     capsule_sha256 = _validate_sha256(capsule_sha256)
     if not resume_ready:
@@ -895,6 +928,9 @@ def _expected_identity(
 
 
 def _validate_exact(record: Mapping[str, Any], expected: Mapping[str, Any]) -> None:
+    revision = expected.get("capsule_revision")
+    if type(revision) is not int or revision < 1:
+        raise TransferError("invalid_identity", "capsule revision must be positive")
     mismatches = [key for key, value in expected.items() if record.get(key) != value]
     if mismatches:
         session_keys = {"source_session_id", "destination_session_id", "destination_task_id"}
@@ -1106,7 +1142,7 @@ def _validate_ownership(
     ):
         raise TransferError("corrupt_ownership", "sole-writer ownership fields are inconsistent")
     revision = ownership.get("capsule_revision")
-    if not isinstance(revision, int) or revision < 1:
+    if type(revision) is not int or revision < 1:
         raise TransferError("corrupt_ownership", "ownership revision is invalid")
     try:
         _validate_sha256(str(ownership["capsule_sha256"]))
@@ -1116,24 +1152,42 @@ def _validate_ownership(
     stop = ownership.get("source_stop")
     if not isinstance(stop, dict) or stop.get("enforced_read_only") is not True:
         raise TransferError("corrupt_ownership", "ownership lacks enforced source read-only state")
+    requested = stop.get("requested")
     stop_result = stop.get("result")
-    if stop_result in FINAL_STOP_RESULTS:
-        expected_kind = FINAL_STOP_EVIDENCE.get(
-            (str(stop.get("capability", "")), str(stop_result))
-        )
-        evidence = stop.get("adapter_evidence")
+    if requested is False:
         if (
-            expected_kind is None
-            or not isinstance(evidence, dict)
-            or evidence.get("kind") != expected_kind
-            or not isinstance(evidence.get("reference"), str)
-            or not evidence["reference"]
-            or not isinstance(evidence.get("recorded_at"), str)
-            or not evidence["recorded_at"]
+            stop.get("observed_quiesced") is not False
+            or stop.get("termination_pending") is not False
+            or any(
+                key in stop
+                for key in (
+                    "capability",
+                    "result",
+                    "retry_count",
+                    "retry_limit",
+                    "adapter_evidence",
+                )
+            )
         ):
-            raise TransferError("corrupt_ownership", "final stop result lacks compatible adapter evidence")
-    elif isinstance(stop.get("adapter_evidence"), dict):
-        raise TransferError("corrupt_ownership", "non-final stop state contains success evidence")
+            raise TransferError("corrupt_ownership", "unrequested stop state is inconsistent")
+    elif requested is not True:
+        raise TransferError("corrupt_ownership", "stop request flag is invalid")
+    elif stop_result == "requested":
+        retry_count = stop.get("retry_count")
+        retry_limit = stop.get("retry_limit")
+        if (
+            stop.get("capability") not in STOP_CAPABILITIES
+            or type(retry_count) is not int
+            or type(retry_limit) is not int
+            or retry_limit != 3
+            or not 0 <= retry_count <= retry_limit
+            or stop.get("observed_quiesced") is not False
+            or stop.get("termination_pending") is not False
+            or stop.get("adapter_evidence") is not None
+        ):
+            raise TransferError("corrupt_ownership", "stop request state is inconsistent")
+    elif not _ownership_can_continue(ownership):
+        raise TransferError("corrupt_ownership", "stop result state is inconsistent")
 
     tombstone = _load_json(paths.tombstone, required=True)
     if _digest(tombstone) != ownership.get("tombstone_digest"):

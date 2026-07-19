@@ -902,6 +902,143 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             )["allowed"]
         )
 
+    def test_coherent_termination_pending_authorizes_only_destination(self) -> None:
+        transfer_id, exact = self._ready()
+        transfer_control.acknowledge(self.repo, **exact)
+        transfer_control.request_stop(
+            self.repo,
+            source_session_id=self.SOURCE,
+            transfer_id=transfer_id,
+            capability="unsupported",
+        )
+        transfer_control.record_stop(
+            self.repo,
+            source_session_id=self.SOURCE,
+            transfer_id=transfer_id,
+            result="unsupported",
+            detail="host exposes no source interruption primitive",
+        )
+        paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
+        ownership = json.loads(paths.ownership.read_text(encoding="utf-8"))
+        stop = ownership["source_stop"]
+        self.assertIs(stop["requested"], True)
+        self.assertIn(stop["capability"], transfer_control.STOP_CAPABILITIES)
+        self.assertIn(stop["result"], transfer_control.PENDING_STOP_RESULTS)
+        self.assertIs(stop["termination_pending"], True)
+        self.assertIs(stop["observed_quiesced"], False)
+        self.assertIs(stop["enforced_read_only"], True)
+        self.assertIs(type(stop["retry_count"]), int)
+        self.assertIs(type(stop["retry_limit"]), int)
+        self.assertLessEqual(stop["retry_count"], stop["retry_limit"])
+
+        for actor, expected in (
+            (self.SOURCE, False),
+            ("unrelated-session", False),
+            (self.DESTINATION, True),
+        ):
+            with self.subTest(actor=actor):
+                decision = transfer_control.guard_write(
+                    self.repo,
+                    actor_session_id=actor,
+                    source_session_id=self.SOURCE,
+                )
+                self.assertIs(decision["allowed"], expected)
+
+    def test_forged_termination_pending_state_is_incoherent_and_embargoed(self) -> None:
+        transfer_id, exact = self._ready()
+        transfer_control.acknowledge(self.repo, **exact)
+        paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
+        ownership = json.loads(paths.ownership.read_text(encoding="utf-8"))
+        ownership["source_stop"]["termination_pending"] = True
+        transfer_control.durable_write_json(paths.ownership, ownership)
+
+        self.assertFalse(transfer_control._ownership_can_continue(ownership))
+        decision = transfer_control.guard_write(
+            self.repo,
+            actor_session_id=self.DESTINATION,
+            source_session_id=self.SOURCE,
+        )
+        self.assertFalse(decision["allowed"])
+        self.assertEqual(decision["reason"], "ownership_corrupt")
+        with self.assertRaises(transfer_control.TransferError) as raised:
+            transfer_control.status(self.repo, source_session_id=self.SOURCE)
+        self.assertEqual(raised.exception.code, "corrupt_ownership")
+
+    def test_incoherent_pending_stop_fields_never_authorize_continuation(self) -> None:
+        transfer_id, exact = self._ready()
+        transfer_control.acknowledge(self.repo, **exact)
+        transfer_control.request_stop(
+            self.repo,
+            source_session_id=self.SOURCE,
+            transfer_id=transfer_id,
+            capability="unsupported",
+        )
+        transfer_control.record_stop(
+            self.repo,
+            source_session_id=self.SOURCE,
+            transfer_id=transfer_id,
+            result="unsupported",
+        )
+        paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
+        coherent = json.loads(paths.ownership.read_text(encoding="utf-8"))
+        cases = (
+            ("requested", False),
+            ("capability", "forged"),
+            ("result", "requested"),
+            ("observed_quiesced", True),
+            ("termination_pending", False),
+            ("enforced_read_only", False),
+            ("retry_count", True),
+            ("retry_count", -1),
+            ("retry_count", 4),
+            ("retry_limit", True),
+            ("retry_limit", 4),
+        )
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                forged = json.loads(json.dumps(coherent))
+                forged["source_stop"][field] = value
+                transfer_control.durable_write_json(paths.ownership, forged)
+                self.assertFalse(transfer_control._ownership_can_continue(forged))
+                decision = transfer_control.guard_write(
+                    self.repo,
+                    actor_session_id=self.DESTINATION,
+                    source_session_id=self.SOURCE,
+                )
+                self.assertFalse(decision["allowed"])
+                self.assertEqual(decision["reason"], "ownership_corrupt")
+
+    def test_incoherent_final_stop_with_pending_flag_is_embargoed(self) -> None:
+        transfer_id, exact = self._ready()
+        transfer_control.acknowledge(self.repo, **exact)
+        transfer_control.request_stop(
+            self.repo,
+            source_session_id=self.SOURCE,
+            transfer_id=transfer_id,
+            capability="native_interrupt",
+        )
+        transfer_control.record_stop(
+            self.repo,
+            source_session_id=self.SOURCE,
+            transfer_id=transfer_id,
+            result="interrupted",
+            evidence_kind="native_interrupt_result",
+            evidence_reference="adapter://interrupt/final",
+        )
+        paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
+        ownership = json.loads(paths.ownership.read_text(encoding="utf-8"))
+        ownership["source_stop"]["termination_pending"] = True
+        transfer_control.durable_write_json(paths.ownership, ownership)
+
+        self.assertFalse(transfer_control._ownership_can_continue(ownership))
+        decision = transfer_control.guard_write(
+            self.repo,
+            actor_session_id=self.DESTINATION,
+            source_session_id=self.SOURCE,
+        )
+        self.assertFalse(decision["allowed"])
+        self.assertEqual(decision["reason"], "ownership_corrupt")
+
     def test_13_failed_stop_keeps_destination_sole_writer_and_allows_safe_cleanup_retry(self) -> None:
         transfer_id, exact = self._ready()
         transfer_control.acknowledge(self.repo, **exact)
