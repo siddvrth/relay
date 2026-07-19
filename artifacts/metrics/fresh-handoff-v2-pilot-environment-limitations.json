@@ -1,0 +1,47 @@
+{
+  "artifact_schema": "fresh-handoff-pilot-environment-limitations-v1",
+  "artifact_type": "capability_probe_record",
+  "status": "environment_limited",
+  "claim_eligible": false,
+  "formal_v3_minimum_pairs": 20,
+  "pilot_status": "not_run",
+  "probe_policy": "Every probe records a literal command, a non-null textual result, and executable or not_executable status. A missing command, host surface, credentialed run, or trustworthy measurement is not_executable and is never recorded as a zero or null observation.",
+  "capability_probes": [
+    {
+      "capability": "formal_v3_minimum_pair_count",
+      "command": "python3 -c \"import sys; sys.path.insert(0, 'skills/checkpoint-and-continue/scripts'); import goal_telemetry_report as g; print(g.MINIMUM_PAIRED_RUNS)\"",
+      "status": "executable",
+      "result": "20",
+      "limitation": "The frozen five-pair pilot is below the formal V3 minimum and cannot unlock an empirical claim."
+    },
+    {
+      "capability": "repository_pilot_collector",
+      "command": "command -v fresh-handoff-pilot-collector",
+      "status": "not_executable",
+      "result": "exit 1: fresh-handoff-pilot-collector is not installed and no repository pilot collector exists",
+      "limitation": "No collector is available; no run or measurement was attempted."
+    },
+    {
+      "capability": "trustworthy_local_host_total_and_phase_tokens",
+      "command": "codex exec --help | rg -n 'total_aggregate_goal_tokens|source_tokens_before_handoff|handoff_generation_tokens|destination_resume_tokens|completion_after_resume_tokens'",
+      "status": "not_executable",
+      "result": "exit 1: the local host CLI exposes no trustworthy total aggregate and lifecycle-phase token result fields",
+      "limitation": "Local token totals and phase values are unavailable and must not be inferred from text, bytes, or partial goal telemetry."
+    },
+    {
+      "capability": "paired_clean_task_controller",
+      "command": "command -v fresh-handoff-paired-task-controller",
+      "status": "not_executable",
+      "result": "exit 1: fresh-handoff-paired-task-controller is not installed and no paired clean-task controller exists",
+      "limitation": "The environment cannot execute isolated, parity-controlled A/B task pairs."
+    },
+    {
+      "capability": "authenticated_hosted_actions_result",
+      "command": "gh run view --workflow fresh-handoff-five-pair-pilot --json databaseId,status,conclusion",
+      "status": "not_executable",
+      "result": "not executed: no authorized authenticated hosted Actions pilot run or run identifier exists",
+      "limitation": "No hosted Actions result is available and none is represented as local evidence."
+    }
+  ],
+  "conclusion": "This environment can preserve the preregistered task structure but cannot execute or collect the pilot. Both pilot artifacts remain non-empirical, claim-ineligible, and not-run."
+}

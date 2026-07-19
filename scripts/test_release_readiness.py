@@ -512,6 +512,132 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertEqual(result["v2_study_count"], 1)
         self.assertEqual(result["v3_study_count"], 1)
 
+    def test_five_pair_pilot_preregistration_is_frozen_and_complete(self) -> None:
+        pilot = json.loads(
+            (
+                PROJECT_ROOT
+                / "artifacts/metrics/fresh-handoff-v2-five-pair-pilot-preregistration.json"
+            ).read_text(encoding="utf-8")
+        )
+        pairs = pilot["pairs"]
+        expected_task_ids = [
+            "revision-owner-concurrency",
+            "validation-resume-schema",
+            "tombstone-retry-recovery",
+            "fresh-install-portability",
+            "release-evidence-audit",
+        ]
+        expected_result_fields = {
+            "status",
+            "task_correctness",
+            "constraint_retention",
+            "completeness",
+            "validation_quality",
+            "resume_usefulness",
+            "completed_work_repeated",
+            "remaining_work_skipped",
+            "first_resumed_action_correct",
+            "human_intervention",
+            "total_aggregate_goal_tokens",
+            "source_tokens_before_handoff",
+            "handoff_generation_tokens",
+            "destination_resume_tokens",
+            "completion_after_resume_tokens",
+            "capsule_bytes",
+            "prompt_bytes",
+        }
+
+        self.assertEqual([pair["task_id"] for pair in pairs], expected_task_ids)
+        self.assertEqual([pair["arm_order"] for pair in pairs], ["AB", "BA", "AB", "BA", "AB"])
+        self.assertEqual(len({pair["prompt"] for pair in pairs}), 5)
+        self.assertEqual(len({pair["task_repository_commit"] for pair in pairs}), 1)
+        self.assertEqual(
+            pilot["runtime_bindings"]["A"]["commit_id"],
+            "301ea7ccb7d0177f26d66c17680ffd5e6115a872",
+        )
+        self.assertEqual(pilot["runtime_bindings"]["B"]["commit_id"], "FINAL_HEAD")
+        self.assertIn("replace FINAL_HEAD", pilot["runtime_bindings"]["B"]["binding_rule"])
+        self.assertEqual(
+            pilot["shared_run_configuration"],
+            {
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "high",
+                "goal_token_budget": 5000,
+                "same_task_objective_per_pair": True,
+                "same_repository_state_per_pair": True,
+                "same_evaluation_rubric_per_pair": True,
+            },
+        )
+        for pair in pairs:
+            with self.subTest(task_id=pair["task_id"]):
+                self.assertEqual(len(pair["arms"]), 2)
+                self.assertEqual("".join(arm["arm"] for arm in pair["arms"]), pair["arm_order"])
+                for arm in pair["arms"]:
+                    result = arm["result"]
+                    self.assertEqual(set(result), expected_result_fields)
+                    self.assertEqual(result["status"], "not_run")
+                    self.assertTrue(
+                        all(value is None for key, value in result.items() if key != "status")
+                    )
+        self.assertFalse(pilot["claim_eligible"])
+        self.assertEqual(pilot["status"], "not_run")
+
+    def test_pilot_promising_gate_is_six_conjunctive_and_negative_stops(self) -> None:
+        pilot = json.loads(
+            (
+                PROJECT_ROOT
+                / "artifacts/metrics/fresh-handoff-v2-five-pair-pilot-preregistration.json"
+            ).read_text(encoding="utf-8")
+        )
+        gates = pilot["analysis_plan"]["promising_gates"]
+
+        self.assertEqual(len(gates), 6)
+        self.assertTrue(all(gate["required"] for gate in gates))
+        self.assertEqual(pilot["analysis_plan"]["combination"], "all_six_conjunctive")
+        self.assertEqual(pilot["analysis_plan"]["negative_stop"]["action"], "stop")
+        self.assertTrue(pilot["retention_policy"]["retain_failed_runs"])
+        self.assertTrue(pilot["retention_policy"]["retain_unfavorable_runs"])
+
+    def test_five_pair_pilot_is_nonclaim_and_cannot_unlock_release(self) -> None:
+        limitations = json.loads(
+            (
+                PROJECT_ROOT
+                / "artifacts/metrics/fresh-handoff-v2-pilot-environment-limitations.json"
+            ).read_text(encoding="utf-8")
+        )
+        empirical = release.assess_empirical_evidence(PROJECT_ROOT)
+        distribution_result = distribution.validate_goal_telemetry_artifacts(PROJECT_ROOT)
+        release_result = release.assess(PROJECT_ROOT)
+
+        self.assertEqual(limitations["formal_v3_minimum_pairs"], 20)
+        self.assertEqual(len(limitations["capability_probes"]), 5)
+        self.assertEqual(
+            [probe["status"] for probe in limitations["capability_probes"]],
+            ["executable", "not_executable", "not_executable", "not_executable", "not_executable"],
+        )
+        self.assertTrue(
+            all(
+                probe["result"] is not None
+                and probe["status"] in {"executable", "not_executable"}
+                for probe in limitations["capability_probes"]
+            )
+        )
+        self.assertFalse(empirical["gate_passed"])
+        self.assertNotIn("schema_version", limitations)
+        self.assertNotIn("study_type", limitations)
+        self.assertNotIn(
+            "fresh-handoff-v2-five-pair-pilot-preregistration.json",
+            empirical["candidate_files"],
+        )
+        self.assertNotIn(
+            "fresh-handoff-v2-pilot-environment-limitations.json",
+            empirical["candidate_files"],
+        )
+        self.assertEqual(distribution_result["v2_study_count"], 0)
+        self.assertEqual(distribution_result["v3_study_count"], 0)
+        self.assertFalse(release_result["token_efficiency_claim_ready"])
+        self.assertFalse(release_result["cost_claim_ready"])
+
     def test_distribution_rejects_malformed_v3(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "distribution"
