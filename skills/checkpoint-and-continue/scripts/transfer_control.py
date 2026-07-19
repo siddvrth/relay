@@ -1154,7 +1154,7 @@ def acknowledge(
     capsule_sha256: str,
     nonce: str,
 ) -> dict[str, Any]:
-    paths, _ = _load_exact(repo, source_session_id, transfer_id)
+    paths, record = _load_exact(repo, source_session_id, transfer_id)
     expected = _expected_identity(
         source_session_id=source_session_id,
         destination_session_id=destination_session_id,
@@ -1166,9 +1166,16 @@ def acknowledge(
         nonce=_validate_nonce(nonce),
     )
     with _locked(paths.lock):
-        record = _active_record(paths)
-        if record["transfer_id"] != transfer_id:
-            raise TransferError("stale_acknowledgement", "transfer is no longer active")
+        tombstone = _load_json(paths.tombstone)
+        receipt: dict[str, Any] | None = None
+        if tombstone:
+            if tombstone.get("transfer_id") != transfer_id or tombstone.get("nonce") != record.get("nonce"):
+                raise TransferError("ownership_conflict", "source is revoked by another transfer")
+            receipt = _validate_tombstone_receipt(paths, tombstone, record)
+        else:
+            record = _active_record(paths)
+            if record["transfer_id"] != transfer_id:
+                raise TransferError("stale_acknowledgement", "transfer is no longer active")
         _validate_exact(record, expected)
         if record.get("verification", {}).get("result") != "verified":
             raise TransferError("verification_required", "exact destination verification is required")
@@ -1193,12 +1200,7 @@ def acknowledge(
         ):
             raise TransferError("ownership_conflict", "ownership belongs to another transfer")
 
-        tombstone = _load_json(paths.tombstone)
-        if tombstone:
-            if tombstone.get("transfer_id") != transfer_id or tombstone.get("nonce") != record.get("nonce"):
-                raise TransferError("ownership_conflict", "source is revoked by another transfer")
-            receipt = _validate_tombstone_receipt(paths, tombstone, record)
-        else:
+        if receipt is None:
             receipt = _receipt(record, _now())
             tombstone = {
                 "version": TRANSFER_VERSION,

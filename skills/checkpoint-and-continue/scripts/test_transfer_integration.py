@@ -117,6 +117,16 @@ class TransferIntegrationTests(unittest.TestCase):
         transfer.acknowledge(self.repo, **exact)
         return transfer_id, exact
 
+    def interrupt_after_tombstone(self) -> dict[str, object]:
+        _transfer_id, exact = self.bind_destination()
+        with mock.patch.dict(
+            os.environ,
+            {transfer.FAULT_ENV: "after_tombstone_before_ownership"},
+        ):
+            with self.assertRaises(transfer.FaultInjected):
+                transfer.acknowledge(self.repo, **exact)
+        return exact
+
     @staticmethod
     def tree_snapshot(repo: Path) -> dict[str, str]:
         snapshot: dict[str, str] = {}
@@ -596,6 +606,54 @@ class TransferIntegrationTests(unittest.TestCase):
             plugin_root=missing_plugin,
         )
         self.assertEqual(prompt, {"continue": True})
+
+    def test_exact_acknowledgement_retry_recovers_when_active_pointer_is_missing(self) -> None:
+        exact = self.interrupt_after_tombstone()
+        paths = transfer.transfer_paths(self.repo, self.SOURCE)
+        paths.active.unlink()
+
+        recovered = transfer.acknowledge(self.repo, **exact)
+
+        self.assertEqual(recovered["phase"], "acknowledged")
+        self.assertEqual(recovered["destination_session_id"], self.DESTINATION)
+        self.assertTrue(paths.ownership.exists())
+
+    def test_exact_acknowledgement_retry_recovers_when_active_pointer_is_corrupt(self) -> None:
+        exact = self.interrupt_after_tombstone()
+        paths = transfer.transfer_paths(self.repo, self.SOURCE)
+        paths.active.write_text("{corrupt", encoding="utf-8")
+
+        recovered = transfer.acknowledge(self.repo, **exact)
+
+        self.assertEqual(recovered["phase"], "acknowledged")
+        self.assertEqual(recovered["destination_session_id"], self.DESTINATION)
+        self.assertTrue(paths.ownership.exists())
+
+    def test_acknowledgement_retry_with_mismatched_nonce_remains_fail_closed(self) -> None:
+        exact = self.interrupt_after_tombstone()
+        paths = transfer.transfer_paths(self.repo, self.SOURCE)
+        paths.active.write_text("{corrupt", encoding="utf-8")
+        mismatched = {**exact, "nonce": "mismatchednonceabcdefghijklmnop"}
+
+        with self.assertRaises(transfer.TransferError) as raised:
+            transfer.acknowledge(self.repo, **mismatched)
+
+        self.assertEqual(raised.exception.code, "replayed_acknowledgement")
+        self.assertFalse(paths.ownership.exists())
+
+    def test_acknowledgement_retry_with_forged_receipt_remains_fail_closed(self) -> None:
+        exact = self.interrupt_after_tombstone()
+        paths = transfer.transfer_paths(self.repo, self.SOURCE)
+        paths.active.unlink()
+        tombstone = json.loads(paths.tombstone.read_text(encoding="utf-8"))
+        tombstone["receipt"]["nonce"] = "forgedreceiptnonceabcdefghijklmnop"
+        paths.tombstone.write_text(json.dumps(tombstone), encoding="utf-8")
+
+        with self.assertRaises(transfer.TransferError) as raised:
+            transfer.acknowledge(self.repo, **exact)
+
+        self.assertEqual(raised.exception.code, "corrupt_ownership")
+        self.assertFalse(paths.ownership.exists())
 
     def test_retained_record_keeps_pre_ack_destination_embargoed_without_pointer(self) -> None:
         self.bind_destination()
