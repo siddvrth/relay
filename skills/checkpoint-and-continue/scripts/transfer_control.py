@@ -525,6 +525,10 @@ def prepare(
     capsule_revision: int,
     capsule_sha256: str,
     resume_ready: bool,
+    next_action: str,
+    validation_evidence: Sequence[str],
+    resume_validation_command: str,
+    resume_validation_expected: str,
     nonce: str = "",
 ) -> dict[str, Any]:
     source_session_id = _require_text("source session ID", source_session_id)
@@ -534,6 +538,12 @@ def prepare(
     capsule_sha256 = _validate_sha256(capsule_sha256)
     if not resume_ready:
         raise TransferError("capsule_not_ready", "a non-ready capsule cannot be transferred")
+    next_action = _require_text("next action", next_action)
+    validation_evidence = [str(item).strip() for item in validation_evidence if str(item).strip()]
+    resume_validation = {
+        "command": _require_text("resume validation command", resume_validation_command),
+        "expected": _require_text("resume validation expected", resume_validation_expected),
+    }
     nonce = _validate_nonce(nonce or secrets.token_urlsafe(24))
     paths = transfer_paths(repo, source_session_id)
     capsule_path = _validate_capsule_path(paths, capsule_path)
@@ -547,6 +557,9 @@ def prepare(
                 active.get("capsule_sha256") == capsule_sha256
                 and active.get("capsule_path") == capsule_path
                 and active.get("goal_identity") == goal_identity
+                and active.get("next_action") == next_action
+                and active.get("validation_evidence") == validation_evidence
+                and active.get("resume_validation") == resume_validation
             )
             if same_revision and same_capsule:
                 return _result(active, idempotent=True)
@@ -566,6 +579,9 @@ def prepare(
                 and record.get("capsule_path") == capsule_path
                 and record.get("capsule_sha256") == capsule_sha256
                 and record.get("resume_ready") is True
+                and record.get("next_action") == next_action
+                and record.get("validation_evidence") == validation_evidence
+                and record.get("resume_validation") == resume_validation
             ]
             if len(exact_orphans) == 1 and len(same_revision) == 1:
                 orphan = exact_orphans[0]
@@ -588,6 +604,9 @@ def prepare(
             "capsule_revision": capsule_revision,
             "capsule_sha256": capsule_sha256,
             "resume_ready": True,
+            "next_action": next_action,
+            "validation_evidence": validation_evidence,
+            "resume_validation": resume_validation,
             "nonce": nonce,
             "phase": "prepared",
             "launch": {"status": "not_requested", "retry_count": 0},
@@ -896,6 +915,20 @@ def _capsule_matches(paths: TransferPaths, record: Mapping[str, Any]) -> bool:
     return hashlib.sha256(content).hexdigest() == record.get("capsule_sha256")
 
 
+def _has_bound_resume_contract(record: Mapping[str, Any]) -> bool:
+    resume_validation = record.get("resume_validation")
+    return bool(
+        isinstance(record.get("next_action"), str)
+        and str(record["next_action"]).strip()
+        and isinstance(record.get("validation_evidence"), list)
+        and isinstance(resume_validation, dict)
+        and isinstance(resume_validation.get("command"), str)
+        and str(resume_validation["command"]).strip()
+        and isinstance(resume_validation.get("expected"), str)
+        and str(resume_validation["expected"]).strip()
+    )
+
+
 def verify(
     repo: Path,
     *,
@@ -911,7 +944,8 @@ def verify(
     repository_inspected: bool,
     goal_inspected: bool,
     exact_next_action: str,
-    smallest_validation: str,
+    resume_validation_command: str,
+    resume_validation_expected: str,
 ) -> dict[str, Any]:
     paths, _ = _load_exact(repo, source_session_id, transfer_id)
     expected = _expected_identity(
@@ -930,12 +964,18 @@ def verify(
             raise TransferError("stale_acknowledgement", "transfer is no longer active")
         try:
             _validate_exact(record, expected)
+            bound_resume_validation = record.get("resume_validation")
             checks_passed = bool(
                 record.get("resume_ready")
+                and _has_bound_resume_contract(record)
                 and repository_inspected
                 and goal_inspected
-                and exact_next_action.strip()
-                and smallest_validation.strip()
+                and record.get("next_action") == exact_next_action.strip()
+                and isinstance(bound_resume_validation, dict)
+                and bound_resume_validation.get("command")
+                == resume_validation_command.strip()
+                and bound_resume_validation.get("expected")
+                == resume_validation_expected.strip()
                 and _capsule_matches(paths, record)
             )
         except TransferError:
@@ -958,7 +998,11 @@ def verify(
                 and prior.get("repository_inspected") is True
                 and prior.get("goal_inspected") is True
                 and prior.get("exact_next_action") == exact_next_action.strip()
-                and prior.get("smallest_validation") == smallest_validation.strip()
+                and prior.get("resume_validation")
+                == {
+                    "command": resume_validation_command.strip(),
+                    "expected": resume_validation_expected.strip(),
+                }
             ):
                 return _result(record, idempotent=True)
             raise TransferError("replayed_acknowledgement", "verification content changed")
@@ -969,7 +1013,11 @@ def verify(
             "repository_inspected": True,
             "goal_inspected": True,
             "exact_next_action": exact_next_action.strip(),
-            "smallest_validation": smallest_validation.strip(),
+            "validation_evidence": list(record.get("validation_evidence") or []),
+            "resume_validation": {
+                "command": resume_validation_command.strip(),
+                "expected": resume_validation_expected.strip(),
+            },
         }
         record["failure"] = None
         _append_event(record, "resume_verified")
@@ -982,6 +1030,9 @@ def _receipt(record: Mapping[str, Any], acknowledged_at: str) -> dict[str, Any]:
     verification = record.get("verification") or {}
     receipt = {
         **_identity(record),
+        "next_action": record.get("next_action"),
+        "validation_evidence": list(record.get("validation_evidence") or []),
+        "resume_validation": record.get("resume_validation"),
         "verification_digest": _digest(verification),
         "acknowledged_at": acknowledged_at,
     }
@@ -1176,6 +1227,11 @@ def acknowledge(
             record = _active_record(paths)
             if record["transfer_id"] != transfer_id:
                 raise TransferError("stale_acknowledgement", "transfer is no longer active")
+        if not _has_bound_resume_contract(record):
+            raise TransferError(
+                "capsule_verification_failed",
+                "transfer lacks an exact prepared resume contract; prepare a fresh revision",
+            )
         _validate_exact(record, expected)
         if record.get("verification", {}).get("result") != "verified":
             raise TransferError("verification_required", "exact destination verification is required")
@@ -1664,7 +1720,8 @@ _HOOK_VALUE_OPTIONS = {
         "--source-session-id", "--transfer-id", "--destination-session-id",
         "--destination-task-id", "--goal-identity", "--capsule-path",
         "--capsule-revision", "--capsule-sha256", "--nonce",
-        "--exact-next-action", "--smallest-validation",
+        "--exact-next-action", "--resume-validation-command",
+        "--resume-validation-expected",
     },
     "acknowledge": {
         "--source-session-id", "--transfer-id", "--destination-session-id",
@@ -1970,6 +2027,11 @@ def _result(record: Mapping[str, Any], *, idempotent: bool = False) -> dict[str,
         "capsule_revision": record.get("capsule_revision"),
         "capsule_sha256": record.get("capsule_sha256"),
         "nonce": record.get("nonce"),
+        "next_action": record.get("next_action"),
+        "validation_evidence": list(record.get("validation_evidence") or []),
+        "resume_validation": record.get("resume_validation"),
+        "verification": record.get("verification"),
+        "acknowledgement": record.get("acknowledgement"),
         "failure": record.get("failure"),
         "can_continue": False,
         "process_group_interruption": dict(PROCESS_GROUP_INTERRUPTION),
@@ -2004,6 +2066,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     command.add_argument("--capsule-revision", required=True, type=int)
     command.add_argument("--capsule-sha256", required=True)
     command.add_argument("--resume-ready", action="store_true")
+    command.add_argument("--next-action", required=True)
+    command.add_argument("--validation-evidence", action="append", default=[])
+    command.add_argument("--resume-validation-command", required=True)
+    command.add_argument("--resume-validation-expected", required=True)
     command.add_argument("--nonce", default="")
 
     command = subparsers.add_parser("launch-requested")
@@ -2037,7 +2103,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     command.add_argument("--repository-inspected", action="store_true")
     command.add_argument("--goal-inspected", action="store_true")
     command.add_argument("--exact-next-action", required=True)
-    command.add_argument("--smallest-validation", required=True)
+    command.add_argument("--resume-validation-command", required=True)
+    command.add_argument("--resume-validation-expected", required=True)
 
     command = subparsers.add_parser("acknowledge")
     _add_exact(command)
@@ -2094,6 +2161,10 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
             capsule_revision=args.capsule_revision,
             capsule_sha256=args.capsule_sha256,
             resume_ready=args.resume_ready,
+            next_action=args.next_action,
+            validation_evidence=args.validation_evidence,
+            resume_validation_command=args.resume_validation_command,
+            resume_validation_expected=args.resume_validation_expected,
             nonce=args.nonce,
         )
     if command == "launch-requested":
@@ -2107,7 +2178,7 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
     if command == "reconcile-launch":
         return reconcile_launch(repo, source_session_id=args.source_session_id, transfer_id=args.transfer_id, transport_key=args.transport_key, observed_nonce=args.observed_nonce, destination_session_id=args.destination_session_id, destination_task_id=args.destination_task_id)
     if command == "verify":
-        return verify(repo, **_exact_kwargs(args), repository_inspected=args.repository_inspected, goal_inspected=args.goal_inspected, exact_next_action=args.exact_next_action, smallest_validation=args.smallest_validation)
+        return verify(repo, **_exact_kwargs(args), repository_inspected=args.repository_inspected, goal_inspected=args.goal_inspected, exact_next_action=args.exact_next_action, resume_validation_command=args.resume_validation_command, resume_validation_expected=args.resume_validation_expected)
     if command == "acknowledge":
         return acknowledge(repo, **_exact_kwargs(args))
     if command == "ack-timeout":

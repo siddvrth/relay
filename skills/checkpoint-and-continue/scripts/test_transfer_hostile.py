@@ -122,6 +122,10 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             capsule_revision=revision,
             capsule_sha256=self._sha(selected),
             resume_ready=True,
+            next_action="Run the numbered hostile acceptance suite",
+            validation_evidence=[],
+            resume_validation_command="python3 focused_test.py",
+            resume_validation_expected="exit 0 and 7 tests pass",
             nonce=nonce or self.NONCE,
         )
 
@@ -186,7 +190,8 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             repository_inspected=True,
             goal_inspected=True,
             exact_next_action="Run the numbered hostile acceptance suite",
-            smallest_validation="python3 test_transfer_hostile.py -q",
+            resume_validation_command="python3 focused_test.py",
+            resume_validation_expected="exit 0 and 7 tests pass",
         )
 
     def _ready(self) -> tuple[str, dict[str, object]]:
@@ -238,6 +243,8 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             "--decisions", decision,
             "--blockers", "Host interruption may be unavailable and must stay truthful",
             "--validation-status", validation,
+            "--resume-validation-command", "python3 focused_test.py",
+            "--resume-validation-expected", "exit 0 and 7 tests pass",
             "--authoritative-files", "skills/checkpoint-and-continue/scripts/transfer_control.py",
             "--next-step", next_action,
             "--goal-objective", objective,
@@ -293,6 +300,10 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
                         capsule_revision=1,
                         capsule_sha256=self._sha(capsule),
                         resume_ready=True,
+                        next_action=expected,
+                        validation_evidence=["Run the smallest focused validation"],
+                        resume_validation_command=f"validate {session}",
+                        resume_validation_expected="validation passes",
                         nonce=nonce,
                     )
                     transfer_id = str(prepared["transfer_id"])
@@ -334,7 +345,8 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
                         repository_inspected=True,
                         goal_inspected=True,
                         exact_next_action=expected,
-                        smallest_validation=f"validate {session}",
+                        resume_validation_command=f"validate {session}",
+                        resume_validation_expected="validation passes",
                     )
                     acknowledged = transfer_control.acknowledge(case_repo, **exact)
                     self.assertEqual(acknowledged["phase"], "acknowledged")
@@ -562,7 +574,8 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             goal_identity=self.GOAL,
             transfer_nonce=self.NONCE,
             transfer_id=transfer_id,
-            smallest_validation="inspect exact live state",
+            resume_validation_command="python3 focused_test.py",
+            resume_validation_expected="exit 0 and 7 tests pass",
         )
         self.assertIsNotNone(prompt)
         assert prompt is not None
@@ -1012,7 +1025,8 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             goal_identity=self.GOAL,
             transfer_nonce=self.NONCE,
             transfer_id=transfer_control.derive_transfer_id(1, self.NONCE),
-            smallest_validation="inspect live state",
+            resume_validation_command="python3 focused_test.py",
+            resume_validation_expected="exit 0 and 7 tests pass",
         )
         self.assertIsNotNone(prompt)
         assert prompt is not None
@@ -1191,6 +1205,9 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
                     "--capsule-revision", "1",
                     "--capsule-sha256", self._sha(capsule),
                     "--resume-ready",
+                    "--next-action", "run parity lifecycle",
+                    "--resume-validation-command", "python3 focused_test.py",
+                    "--resume-validation-expected", "exit 0 and 7 tests pass",
                     "--nonce", self.NONCE,
                 )
                 transfer_id = str(prepared["transfer_id"])
@@ -1230,7 +1247,8 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
                     "--repository-inspected",
                     "--goal-inspected",
                     "--exact-next-action", "run parity lifecycle",
-                    "--smallest-validation", "inspect parity status",
+                    "--resume-validation-command", "python3 focused_test.py",
+                    "--resume-validation-expected", "exit 0 and 7 tests pass",
                 )
                 run("acknowledge", *exact)
                 run(

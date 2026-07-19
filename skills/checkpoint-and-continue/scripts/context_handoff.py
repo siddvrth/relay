@@ -164,7 +164,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dedup-seconds", type=int, default=DEFAULT_DEDUP_SECONDS)
     _append_argument(parser, "--decisions", "--decision", dest="decisions")
     _append_argument(parser, "--blockers", "--blocker", dest="blockers")
-    parser.add_argument("--validation-status", default="")
+    _append_argument(
+        parser,
+        "--validation-evidence",
+        "--validation-status",
+        dest="validation_evidence",
+    )
+    parser.add_argument("--resume-validation-command", default="")
+    parser.add_argument("--resume-validation-expected", default="")
     _append_argument(
         parser,
         "--authoritative-files",
@@ -361,6 +368,21 @@ def _text_value(explicit: str, active: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def _resume_validation_value(
+    explicit: str,
+    active: dict[str, Any],
+    key: str,
+) -> str:
+    if explicit.strip():
+        return explicit.strip()
+    value = active.get("resume_validation")
+    if isinstance(value, dict):
+        selected = value.get(key)
+        if selected is not None and str(selected).strip():
+            return str(selected).strip()
+    return ""
+
+
 def merge_state(args: argparse.Namespace, active: dict[str, Any]) -> dict[str, Any]:
     return {
         "session_id": args.session_id,
@@ -379,11 +401,20 @@ def merge_state(args: argparse.Namespace, active: dict[str, Any]) -> dict[str, A
         "authoritative_files": _list_value(
             args.authoritative_files, active, "authoritative_files"
         ),
-        "validation": (
-            [args.validation_status.strip()]
-            if args.validation_status.strip()
-            else _list_value([], active, "validation")
+        "validation_evidence": (
+            _list_value(args.validation_evidence, active, "validation_evidence")
+            if args.validation_evidence
+            else _list_value([], active, "validation_evidence")
+            or _list_value([], active, "validation")
         ),
+        "resume_validation": {
+            "command": _resume_validation_value(
+                args.resume_validation_command, active, "command"
+            ),
+            "expected": _resume_validation_value(
+                args.resume_validation_expected, active, "expected"
+            ),
+        },
         "next_action": _text_value(args.next_step, active, "next_action", "next_step"),
         "goal_objective": _text_value(args.goal_objective, active, "goal_objective"),
         "goal_identity": args.goal_identity,
@@ -514,8 +545,16 @@ def invoke_write_handoff(
     ):
         for value in state[key]:
             command.extend([flag, value])
-    for value in state["validation"]:
-        command.extend(["--validation-status", value])
+    for value in state["validation_evidence"]:
+        command.extend(["--validation-evidence", value])
+    command.extend(
+        [
+            "--resume-validation-command",
+            state["resume_validation"]["command"],
+            "--resume-validation-expected",
+            state["resume_validation"]["expected"],
+        ]
+    )
     for value in args.commands_run:
         command.extend(["--commands-run", value])
     for value in args.note:
@@ -600,7 +639,25 @@ def lifecycle_next_actions(
             "phase": "verify_and_acknowledge",
             "rule": "destination must supply every exact capsule identity field from the active transfer before acknowledgement",
             "commands_argv": [
-                [*base, "verify", *exact, "--repository-inspected", "--goal-inspected", "--exact-next-action", "<exact-next-action>", "--smallest-validation", "<smallest-validation>"],
+                [
+                    *base,
+                    "verify",
+                    *exact,
+                    "--repository-inspected",
+                    "--goal-inspected",
+                    "--exact-next-action",
+                    str(transfer.get("next_action") or "<exact-next-action>"),
+                    "--resume-validation-command",
+                    str(
+                        (transfer.get("resume_validation") or {}).get("command")
+                        or "<resume-validation-command>"
+                    ),
+                    "--resume-validation-expected",
+                    str(
+                        (transfer.get("resume_validation") or {}).get("expected")
+                        or "<resume-validation-expected>"
+                    ),
+                ],
                 [*base, "acknowledge", *exact],
             ],
         },
@@ -981,6 +1038,9 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
                 "resume_ready": bool(write_result.get("resume_ready")),
                 "goal_identity": write_result.get("goal_identity"),
                 "transfer_nonce": write_result.get("transfer_nonce"),
+                "next_action": write_result.get("next_action"),
+                "validation_evidence": write_result.get("validation_evidence", []),
+                "resume_validation": write_result.get("resume_validation"),
                 "transfer_id": None,
                 "delivery": {
                     "emitted": False,
@@ -998,18 +1058,29 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
                     capsule_revision=revision,
                     capsule_sha256=str(write_result.get("capsule_sha256", "")),
                     resume_ready=True,
+                    next_action=str(write_result.get("next_action", "")),
+                    validation_evidence=list(write_result.get("validation_evidence") or []),
+                    resume_validation_command=str(
+                        (write_result.get("resume_validation") or {}).get("command", "")
+                    ),
+                    resume_validation_expected=str(
+                        (write_result.get("resume_validation") or {}).get("expected", "")
+                    ),
                     nonce=str(write_result.get("transfer_nonce", "")),
                 )
                 pointer["transfer_id"] = transfer_result["transfer_id"]
             revision_payload = {
-                    "revision": revision,
-                    "state_sha256": state_hash,
-                    "revision_reason": args.reason,
-                    "timestamp": time.time(),
-                    "goal_identity": write_result.get("goal_identity"),
-                    "transfer_nonce": write_result.get("transfer_nonce"),
-                    "transfer_id": pointer["transfer_id"],
-                }
+                "revision": revision,
+                "state_sha256": state_hash,
+                "revision_reason": args.reason,
+                "timestamp": time.time(),
+                "goal_identity": write_result.get("goal_identity"),
+                "transfer_nonce": write_result.get("transfer_nonce"),
+                "next_action": write_result.get("next_action"),
+                "validation_evidence": write_result.get("validation_evidence", []),
+                "resume_validation": write_result.get("resume_validation"),
+                "transfer_id": pointer["transfer_id"],
+            }
             _authorized_json_writes(
                 repo,
                 actor_session_id=actor_session_id,
@@ -1035,6 +1106,9 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
                 "capsule_sha256": pointer.get("capsule_sha256"),
                 "goal_identity": pointer.get("goal_identity"),
                 "transfer_nonce": pointer.get("transfer_nonce"),
+                "next_action": pointer.get("next_action"),
+                "validation_evidence": pointer.get("validation_evidence", []),
+                "resume_validation": pointer.get("resume_validation"),
                 "resume_ready": pointer.get("resume_ready", False),
                 "continuation_prompt": None,
                 "overflow": None,
@@ -1101,6 +1175,13 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
             or previous_pointer.get("transfer_nonce"),
             "transfer_id": pointer.get("transfer_id")
             or previous_pointer.get("transfer_id"),
+            "next_action": write_result.get("next_action")
+            or previous_pointer.get("next_action"),
+            "validation_evidence": write_result.get("validation_evidence")
+            if "validation_evidence" in write_result
+            else previous_pointer.get("validation_evidence", []),
+            "resume_validation": write_result.get("resume_validation")
+            or previous_pointer.get("resume_validation"),
             "delivery": {
                 "emitted": delivery_emitted,
                 "deduped": bool(delivery_recent),
@@ -1144,6 +1225,9 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
             "goal_identity": pointer.get("goal_identity"),
             "transfer_nonce": pointer.get("transfer_nonce"),
             "transfer_id": pointer.get("transfer_id"),
+            "next_action": pointer.get("next_action"),
+            "validation_evidence": pointer.get("validation_evidence", []),
+            "resume_validation": pointer.get("resume_validation"),
             "delivery_emitted": delivery_emitted,
             "delivered": delivery_emitted,
             "skip_reason": (

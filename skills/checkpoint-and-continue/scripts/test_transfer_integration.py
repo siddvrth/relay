@@ -45,6 +45,9 @@ class TransferIntegrationTests(unittest.TestCase):
     TASK = "destination-task"
     GOAL = "goal:sha256:" + "1" * 64
     NONCE = "integrationnonceabcdefghijklmnop"
+    NEXT_ACTION = "run integration test"
+    VALIDATION_COMMAND = "python3 focused_test.py"
+    VALIDATION_EXPECTED = "exit 0 and 7 tests pass"
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -68,6 +71,10 @@ class TransferIntegrationTests(unittest.TestCase):
             capsule_revision=1,
             capsule_sha256=self.sha,
             resume_ready=True,
+            next_action=self.NEXT_ACTION,
+            validation_evidence=[],
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
             nonce=self.NONCE,
         )
         transfer_id = str(prepared["transfer_id"])
@@ -107,8 +114,9 @@ class TransferIntegrationTests(unittest.TestCase):
             **exact,
             repository_inspected=True,
             goal_inspected=True,
-            exact_next_action="run integration test",
-            smallest_validation="focused integration suite",
+            exact_next_action=self.NEXT_ACTION,
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
         )
         return transfer_id, exact
 
@@ -789,6 +797,8 @@ class TransferIntegrationTests(unittest.TestCase):
             "--blockers", "Injected durability fault only",
             "--authoritative-files", str(CONTEXT),
             "--validation-status", "Focused retry test running",
+            "--resume-validation-command", "python3 focused_test.py",
+            "--resume-validation-expected", "exit 0 and 7 tests pass",
             "--next-step", "Retry from the durable prepare intent",
             "--goal-objective", "Prove crash-safe context preparation",
             "--reason", "integration fault recovery",

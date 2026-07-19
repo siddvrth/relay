@@ -53,7 +53,7 @@ CRITICAL_FIELDS = (
     "decisions",
     "blockers",
     "authoritative_files",
-    "validation",
+    "resume_validation",
     "next_action",
 )
 
@@ -206,7 +206,7 @@ def save_active_task(
     *,
     session_id: str = "",
     objective: str,
-    next_step: str,
+    next_action: str,
     goal_objective: str = "",
     capsule_path: str | None = None,
     reason: str = "",
@@ -220,7 +220,9 @@ def save_active_task(
     decisions: Sequence[str] = (),
     blockers: Sequence[str] = (),
     authoritative_files: Sequence[str] = (),
-    validation: Sequence[str] = (),
+    validation_evidence: Sequence[str] = (),
+    resume_validation_command: str = "",
+    resume_validation_expected: str = "",
     revision: int = 0,
     goal_identity: str = "",
     transfer_nonce: str = "",
@@ -242,9 +244,12 @@ def save_active_task(
         "decisions": list(decisions),
         "blockers": list(blockers),
         "authoritative_files": list(authoritative_files),
-        "validation": list(validation),
-        "next_step": next_step,
-        "next_action": next_step,
+        "validation_evidence": list(validation_evidence),
+        "resume_validation": {
+            "command": resume_validation_command,
+            "expected": resume_validation_expected,
+        },
+        "next_action": next_action,
         "goal_objective": goal_objective,
         "capsule_path": capsule_path,
         "reason": reason,
@@ -374,7 +379,15 @@ def parse_args() -> argparse.Namespace:
         dest="blockers",
         help_text="Blocker or risk.",
     )
-    parser.add_argument("--validation-status", default="")
+    _append_argument(
+        parser,
+        "--validation-evidence",
+        "--validation-status",
+        dest="validation_evidence",
+        help_text="Historical validation evidence. Repeat when needed.",
+    )
+    parser.add_argument("--resume-validation-command", default="")
+    parser.add_argument("--resume-validation-expected", default="")
     _append_argument(
         parser,
         "--authoritative-files",
@@ -442,13 +455,21 @@ def validate_structural_readiness(
             "decisions",
             "blockers",
             "authoritative_files",
-            "validation",
         }:
             values = _as_list(value)
             if not values:
                 failures.append(f"missing:{field}")
             elif any(_normalized_text(item) in PLACEHOLDERS for item in values):
                 failures.append(f"placeholder:{field}")
+            continue
+        if field == "resume_validation":
+            resume_validation = value if isinstance(value, dict) else {}
+            for key in ("command", "expected"):
+                normalized = _normalized_text(resume_validation.get(key, ""))
+                if not normalized:
+                    failures.append(f"missing:resume_validation.{key}")
+                elif normalized in PLACEHOLDERS:
+                    failures.append(f"placeholder:resume_validation.{key}")
             continue
         normalized = _normalized_text(value)
         if not normalized:
@@ -485,7 +506,6 @@ def validate_structural_readiness(
 
 
 def build_state(args: argparse.Namespace) -> dict[str, Any]:
-    validation = _as_list(args.validation_status)
     return {
         "session_id": args.session_id.strip(),
         "revision": args.revision,
@@ -503,7 +523,11 @@ def build_state(args: argparse.Namespace) -> dict[str, Any]:
         "decisions": _as_list(args.decisions),
         "blockers": _as_list(args.blockers),
         "authoritative_files": _as_list(args.authoritative_files),
-        "validation": validation,
+        "validation_evidence": _as_list(args.validation_evidence),
+        "resume_validation": {
+            "command": args.resume_validation_command.strip(),
+            "expected": args.resume_validation_expected.strip(),
+        },
         "next_action": args.next_step.strip(),
     }
 
@@ -535,6 +559,8 @@ def render_kernel(
         ("Objective", [state["objective"]]),
         ("Phase / Status", [f"{state['phase']} / {state['status']}"]),
         ("Next Unfinished Action", [state["next_action"]]),
+        ("Resume Validation Command", [state["resume_validation"]["command"]]),
+        ("Resume Validation Expected", [state["resume_validation"]["expected"]]),
         ("Completion / Stop Condition", state["completion_criteria"]),
         ("Critical Constraints", state["constraints"]),
     )
@@ -549,7 +575,7 @@ def render_kernel(
         ("Decisions", state["decisions"]),
         ("Blockers / Risks", state["blockers"]),
         ("Authoritative Files / Symbols", state["authoritative_files"]),
-        ("Validation", state["validation"]),
+        ("Validation Evidence", state["validation_evidence"]),
     )
     sections.extend(["", "## Supporting State"])
     for title, values in middle:
@@ -561,14 +587,15 @@ def render_kernel(
             "## Execution / Ownership Close",
             "",
             f"- Action now: {state['next_action']}",
-            f"- Smallest validation: {state['validation'][0]}",
+            f"- Resume validation command: {state['resume_validation']['command']}",
+            f"- Resume validation expected: {state['resume_validation']['expected']}",
             f"- Source session: {state['session_id']}",
             f"- Transfer ID: {state['transfer_id']}",
             f"- Goal identity: {state['goal_identity']}",
             f"- Revision: {state['revision']}",
             "- Capsule SHA-256: verify the exact transport SHA-256 against this file",
             f"- Nonce: {state['transfer_nonce']}",
-            "- Acknowledge only after exact identity and smallest-validation verification.",
+            "- Acknowledge only after exact identity and resume-validation verification.",
             "- The destination becomes sole writer only after exact acknowledgement; before then the source remains authoritative.",
         ]
     )
@@ -768,21 +795,25 @@ def build_continuation_prompt(
     goal_identity: str = "",
     transfer_nonce: str = "",
     transfer_id: str = "",
-    smallest_validation: str = "",
+    next_action: str = "",
+    resume_validation_command: str = "",
+    resume_validation_expected: str = "",
 ) -> str | None:
     mandatory_lines = [
         f"Use $checkpoint-and-continue. Continue from {out_path}.",
-        "Read AGENTS.md + exact capsule; inspect live repo/goal.",
+        "Read AGENTS.md + capsule; inspect repo/goal.",
         f"Expected session: {session_id or 'default'}.",
         f"Expected revision: {revision if revision is not None else 'unspecified'}.",
         f"Expected capsule SHA-256: {capsule_sha256}.",
         f"Expected goal identity: {goal_identity}.",
         f"Expected transfer nonce: {transfer_nonce}.",
         f"Expected transfer ID: {transfer_id}.",
-        "Verify SHA-256 + identity before edits.",
-        f"Smallest validation: {smallest_validation or 'inspect live repository and goal state'}.",
-        "transfer_control.py: verify, then acknowledge exact identity.",
-        "Source authoritative/destination control-only until exact acknowledgement; then destination sole writer. Wait for status can_continue:true before implementation.",
+        "Verify SHA-256 + identity.",
+        f"Exact next action: {next_action}.",
+        f"Resume validation command: {resume_validation_command}.",
+        f"Resume validation expected: {resume_validation_expected}.",
+        "transfer_control.py: verify, then acknowledge.",
+        "Source authoritative/destination control-only until exact acknowledgement; destination sole writer after. Wait for status can_continue:true.",
     ]
     mandatory = "\n".join(mandatory_lines)
     mandatory_bytes = len(mandatory.encode("utf-8"))
@@ -903,7 +934,7 @@ def _main() -> int:
             repo,
             session_id=args.session_id,
             objective=state["objective"],
-            next_step=state["next_action"],
+            next_action=state["next_action"],
             goal_objective=args.goal_objective,
             reason=args.reason,
             active_task=state["active_task"],
@@ -916,7 +947,9 @@ def _main() -> int:
             decisions=state["decisions"],
             blockers=state["blockers"],
             authoritative_files=state["authoritative_files"],
-            validation=state["validation"],
+            validation_evidence=state["validation_evidence"],
+            resume_validation_command=state["resume_validation"]["command"],
+            resume_validation_expected=state["resume_validation"]["expected"],
             revision=args.revision,
             goal_identity=args.goal_identity,
             transfer_nonce=args.transfer_nonce,
@@ -969,7 +1002,9 @@ def _main() -> int:
             goal_identity=args.goal_identity,
             transfer_nonce=args.transfer_nonce,
             transfer_id=args.transfer_id,
-            smallest_validation=state["validation"][0] if state["validation"] else "",
+            next_action=state["next_action"],
+            resume_validation_command=state["resume_validation"]["command"],
+            resume_validation_expected=state["resume_validation"]["expected"],
         )
         prompt_guard = {
             "fits": prompt is not None,
@@ -999,7 +1034,7 @@ def _main() -> int:
             repo,
             session_id=args.session_id,
             objective=state["objective"],
-            next_step=state["next_action"],
+            next_action=state["next_action"],
             goal_objective=args.goal_objective,
             capsule_path=str(out_path),
             reason=args.reason,
@@ -1013,7 +1048,9 @@ def _main() -> int:
             decisions=state["decisions"],
             blockers=state["blockers"],
             authoritative_files=state["authoritative_files"],
-            validation=state["validation"],
+            validation_evidence=state["validation_evidence"],
+            resume_validation_command=state["resume_validation"]["command"],
+            resume_validation_expected=state["resume_validation"]["expected"],
             revision=args.revision,
             goal_identity=args.goal_identity,
             transfer_nonce=args.transfer_nonce,
@@ -1059,6 +1096,9 @@ def _main() -> int:
         "goal_identity": args.goal_identity,
         "transfer_nonce": args.transfer_nonce,
         "transfer_id": args.transfer_id,
+        "next_action": state["next_action"],
+        "validation_evidence": state["validation_evidence"],
+        "resume_validation": state["resume_validation"],
         "resume_ready": resume_ready,
         "structural_guard": guard,
         "prompt_guard": prompt_guard,

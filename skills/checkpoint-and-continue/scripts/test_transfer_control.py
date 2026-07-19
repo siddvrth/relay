@@ -31,6 +31,9 @@ class TransferControlTests(unittest.TestCase):
     TASK = "destination-task"
     GOAL = "goal:sha256:example"
     NONCE = "0123456789abcdefghijklmnopqrstuv"
+    NEXT_ACTION = "Run the focused transfer tests"
+    VALIDATION_COMMAND = "python3 focused_test.py"
+    VALIDATION_EXPECTED = "exit 0 and 7 tests pass"
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -53,6 +56,10 @@ class TransferControlTests(unittest.TestCase):
             capsule_revision=revision,
             capsule_sha256=self.sha,
             resume_ready=True,
+            next_action=self.NEXT_ACTION,
+            validation_evidence=[],
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
             nonce=nonce or self.NONCE,
         )
 
@@ -97,8 +104,9 @@ class TransferControlTests(unittest.TestCase):
             **self.exact(transfer_id),
             repository_inspected=True,
             goal_inspected=True,
-            exact_next_action="Run the focused transfer tests",
-            smallest_validation="python3 test_transfer_control.py",
+            exact_next_action=self.NEXT_ACTION,
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
         )
 
     def ready_for_ack(self) -> tuple[str, dict[str, object]]:
@@ -115,6 +123,141 @@ class TransferControlTests(unittest.TestCase):
         self.assertTrue(second["idempotent"])
         paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
         self.assertEqual(len(list(paths.transfers.glob("*.json"))), 1)
+
+    def test_resume_validation_mismatch_fails_then_exact_values_persist_idempotently(self) -> None:
+        prepared = transfer_control.prepare(
+            self.repo,
+            source_session_id=self.SOURCE,
+            goal_identity=self.GOAL,
+            capsule_path=str(self.capsule),
+            capsule_revision=1,
+            capsule_sha256=self.sha,
+            resume_ready=True,
+            next_action=self.NEXT_ACTION,
+            validation_evidence=[],
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
+            nonce=self.NONCE,
+        )
+        transfer_id = str(prepared["transfer_id"])
+        self.launch_and_start(transfer_id)
+
+        mismatches = (
+            ("wrong action", self.VALIDATION_COMMAND, self.VALIDATION_EXPECTED),
+            (self.NEXT_ACTION, "python3 other_test.py", self.VALIDATION_EXPECTED),
+            (self.NEXT_ACTION, self.VALIDATION_COMMAND, "exit 0 and 8 tests pass"),
+        )
+        for action, command, expected in mismatches:
+            with self.subTest(action=action, command=command, expected=expected):
+                with self.assertRaises(transfer_control.TransferError) as raised:
+                    transfer_control.verify(
+                        self.repo,
+                        **self.exact(transfer_id),
+                        repository_inspected=True,
+                        goal_inspected=True,
+                        exact_next_action=action,
+                        resume_validation_command=command,
+                        resume_validation_expected=expected,
+                    )
+                self.assertEqual(
+                    raised.exception.code, "capsule_verification_failed"
+                )
+
+        verified = transfer_control.verify(
+            self.repo,
+            **self.exact(transfer_id),
+            repository_inspected=True,
+            goal_inspected=True,
+            exact_next_action=self.NEXT_ACTION,
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
+        )
+        repeated = transfer_control.verify(
+            self.repo,
+            **self.exact(transfer_id),
+            repository_inspected=True,
+            goal_inspected=True,
+            exact_next_action=self.NEXT_ACTION,
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
+        )
+        self.assertEqual(
+            verified["verification"]["resume_validation"],
+            {"command": self.VALIDATION_COMMAND, "expected": self.VALIDATION_EXPECTED},
+        )
+        self.assertTrue(repeated["idempotent"])
+        transfer_control.acknowledge(self.repo, **self.exact(transfer_id))
+        paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
+        tombstone = json.loads(paths.tombstone.read_text(encoding="utf-8"))
+        receipt = tombstone["receipt"]
+        self.assertEqual(receipt["next_action"], self.NEXT_ACTION)
+        self.assertEqual(receipt["validation_evidence"], [])
+        self.assertEqual(
+            receipt["resume_validation"],
+            {"command": self.VALIDATION_COMMAND, "expected": self.VALIDATION_EXPECTED},
+        )
+
+    def test_history_cannot_substitute_for_bound_resume_validation(self) -> None:
+        prepared = transfer_control.prepare(
+            self.repo,
+            source_session_id=self.SOURCE,
+            goal_identity=self.GOAL,
+            capsule_path=str(self.capsule),
+            capsule_revision=1,
+            capsule_sha256=self.sha,
+            resume_ready=True,
+            next_action=self.NEXT_ACTION,
+            validation_evidence=["Historical suite passed yesterday"],
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
+            nonce=self.NONCE,
+        )
+        transfer_id = str(prepared["transfer_id"])
+        self.launch_and_start(transfer_id)
+
+        with self.assertRaises(transfer_control.TransferError) as raised:
+            transfer_control.verify(
+                self.repo,
+                **self.exact(transfer_id),
+                repository_inspected=True,
+                goal_inspected=True,
+                exact_next_action=self.NEXT_ACTION,
+                resume_validation_command="Historical suite passed yesterday",
+                resume_validation_expected=self.VALIDATION_EXPECTED,
+            )
+        self.assertEqual(raised.exception.code, "capsule_verification_failed")
+
+        paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
+        record_path = paths.transfers / f"{transfer_id}.json"
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        record.pop("resume_validation")
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+        with self.assertRaises(transfer_control.TransferError) as unbound:
+            transfer_control.verify(
+                self.repo,
+                **self.exact(transfer_id),
+                repository_inspected=True,
+                goal_inspected=True,
+                exact_next_action=self.NEXT_ACTION,
+                resume_validation_command=self.VALIDATION_COMMAND,
+                resume_validation_expected=self.VALIDATION_EXPECTED,
+            )
+        self.assertEqual(unbound.exception.code, "capsule_verification_failed")
+        record["phase"] = "resume_verified"
+        record["verification"] = {
+            "result": "verified",
+            "exact_next_action": self.NEXT_ACTION,
+            "smallest_validation": "Historical suite passed yesterday",
+        }
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+        with self.assertRaises(transfer_control.TransferError) as acknowledge_error:
+            transfer_control.acknowledge(
+                self.repo,
+                **self.exact(transfer_id),
+            )
+        self.assertEqual(
+            acknowledge_error.exception.code, "capsule_verification_failed"
+        )
 
     def test_unknown_launch_blocks_blind_second_create_and_reconciles_exact_nonce(self) -> None:
         transfer_id = str(self.prepare()["transfer_id"])
@@ -239,7 +382,8 @@ class TransferControlTests(unittest.TestCase):
                 repository_inspected=True,
                 goal_inspected=True,
                 exact_next_action="next",
-                smallest_validation="test",
+                resume_validation_command=self.VALIDATION_COMMAND,
+                resume_validation_expected=self.VALIDATION_EXPECTED,
             )
         self.assertEqual(raised.exception.code, "replayed_acknowledgement")
         paths = transfer_control.transfer_paths(self.repo, self.SOURCE)
@@ -378,7 +522,8 @@ class TransferControlTests(unittest.TestCase):
             repository_inspected=True,
             goal_inspected=True,
             exact_next_action="Run the focused transfer tests",
-            smallest_validation="python3 test_transfer_control.py",
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
         )
         self.assertTrue(repeated_verify["idempotent"])
         self.assertEqual(repeated_verify["phase"], "acknowledged")
@@ -791,6 +936,10 @@ class TransferControlTests(unittest.TestCase):
             capsule_revision=2,
             capsule_sha256=digest,
             resume_ready=True,
+            next_action="continue second transfer",
+            validation_evidence=[],
+            resume_validation_command="focused test",
+            resume_validation_expected="focused test passes",
             nonce=nonce,
         )
         next_id = str(prepared["transfer_id"])
@@ -831,7 +980,8 @@ class TransferControlTests(unittest.TestCase):
             repository_inspected=True,
             goal_inspected=True,
             exact_next_action="continue second transfer",
-            smallest_validation="focused test",
+            resume_validation_command="focused test",
+            resume_validation_expected="focused test passes",
         )
         accepted = transfer_control.acknowledge(self.repo, **second_exact)
         self.assertEqual(accepted["ownership_epoch"], 2)
@@ -911,6 +1061,10 @@ class TransferControlTests(unittest.TestCase):
                 capsule_revision=1,
                 capsule_sha256=digest,
                 resume_ready=True,
+                next_action=self.NEXT_ACTION,
+                validation_evidence=[],
+                resume_validation_command=self.VALIDATION_COMMAND,
+                resume_validation_expected=self.VALIDATION_EXPECTED,
                 nonce=self.NONCE,
             )
         self.assertEqual(raised.exception.code, "unsafe_capsule_path")
@@ -925,6 +1079,10 @@ class TransferControlTests(unittest.TestCase):
                 capsule_revision=1,
                 capsule_sha256=digest,
                 resume_ready=True,
+                next_action=self.NEXT_ACTION,
+                validation_evidence=[],
+                resume_validation_command=self.VALIDATION_COMMAND,
+                resume_validation_expected=self.VALIDATION_EXPECTED,
                 nonce=self.NONCE,
             )
         self.assertEqual(raised.exception.code, "unsafe_capsule_path")
@@ -1000,6 +1158,10 @@ class TransferControlTests(unittest.TestCase):
             capsule_revision=1,
             capsule_sha256=self.sha,
             resume_ready=True,
+            next_action=self.NEXT_ACTION,
+            validation_evidence=[],
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
             nonce="differentnonceabcdefghijklmnop",
         )
         self.assertTrue(recovered["idempotent"])
@@ -1044,6 +1206,12 @@ class TransferControlTests(unittest.TestCase):
                 "--capsule-sha256",
                 self.sha,
                 "--resume-ready",
+                "--next-action",
+                self.NEXT_ACTION,
+                "--resume-validation-command",
+                self.VALIDATION_COMMAND,
+                "--resume-validation-expected",
+                self.VALIDATION_EXPECTED,
                 "--nonce",
                 self.NONCE,
             ],

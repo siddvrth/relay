@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 import hashlib
 import os
 import re
@@ -66,7 +67,9 @@ sys.path.insert(0, str(SCRIPTS))
 from write_handoff import (  # noqa: E402
     build_continuation_prompt,
     default_out_path,
+    session_scope,
     trim_lines,
+    validate_structural_readiness,
 )
 import goal_telemetry_report as telemetry  # noqa: E402
 from goal_telemetry_report import build_report  # noqa: E402
@@ -201,6 +204,10 @@ def rich_handoff_args(repo: Path, *, session_id: str = "session-rich") -> list[s
         "Live hook trust still requires host validation",
         "--validation-status",
         "Regression suite added; runtime validation pending",
+        "--resume-validation-command",
+        "python3 focused_test.py",
+        "--resume-validation-expected",
+        "exit 0 and 7 tests pass",
         "--authoritative-files",
         "skills/checkpoint-and-continue/scripts/write_handoff.py::build_markdown",
         "--next-step",
@@ -285,6 +292,118 @@ def find_latest_pointer(repo: Path) -> tuple[Path, dict[str, object]]:
 
 
 class WriteHandoffTests(unittest.TestCase):
+    def test_validation_evidence_round_trips_independently_from_resume_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            init_repo(repo)
+            args = rich_handoff_args(repo, session_id="validation-contract")
+            validation_index = args.index("--validation-status")
+            del args[validation_index : validation_index + 2]
+
+            result = run_write_handoff(
+                *args,
+                "--validation-evidence",
+                "Historical suite passed yesterday",
+                "--validation-evidence",
+                "Lint was green before the handoff",
+                "--resume-validation-command",
+                "python3 focused_test.py",
+                "--resume-validation-expected",
+                "exit 0 and 7 tests pass",
+            )
+
+            payload = json_payload(result)
+            capsule = Path(str(payload["capsule_path"]))
+            active = json.loads(
+                (
+                    repo
+                    / ".omx"
+                    / "state"
+                    / "checkpoint-and-continue"
+                    / "sessions"
+                    / session_scope("validation-contract")
+                    / ".active-task.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                active["validation_evidence"],
+                ["Historical suite passed yesterday", "Lint was green before the handoff"],
+            )
+            self.assertEqual(
+                active["resume_validation"],
+                {"command": "python3 focused_test.py", "expected": "exit 0 and 7 tests pass"},
+            )
+            self.assertNotIn("validation", active)
+            self.assertNotIn("next_step", active)
+            content = capsule.read_text(encoding="utf-8")
+            self.assertIn("Historical suite passed yesterday", content)
+            self.assertIn("python3 focused_test.py", content)
+            self.assertIn("exit 0 and 7 tests pass", content)
+
+    def test_validation_evidence_prompt_uses_exact_resume_contract_not_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            init_repo(repo)
+            args = rich_handoff_args(repo, session_id="validation-prompt")
+            validation_index = args.index("--validation-status")
+            del args[validation_index : validation_index + 2]
+
+            payload = json_payload(
+                run_write_handoff(
+                    *args,
+                    "--validation-evidence",
+                    "Historical suite passed yesterday",
+                    "--resume-validation-command",
+                    "python3 focused_test.py",
+                    "--resume-validation-expected",
+                    "exit 0 and 7 tests pass",
+                )
+            )
+
+            prompt = str(payload["continuation_prompt"])
+            self.assertIn("python3 focused_test.py", prompt)
+            self.assertIn("exit 0 and 7 tests pass", prompt)
+            self.assertNotIn("Historical suite passed yesterday", prompt)
+
+    def test_validation_evidence_can_be_empty_when_resume_validation_is_complete(self) -> None:
+        state: dict[str, object] = {
+            "session_id": "session-a",
+            "revision": 2,
+            "transfer_nonce": "abcdefghijklmnopqrstuv",
+            "transfer_id": "r2-" + hashlib.sha256(b"abcdefghijklmnopqrstuv").hexdigest()[:16],
+            "goal_identity": "goal:sha256:" + ("a" * 64),
+            "objective": "Ship the handoff",
+            "active_task": "Implement structural readiness",
+            "phase": "verification",
+            "status": "in progress",
+            "completion_criteria": ["All tests pass"],
+            "completed_work": ["Added fixtures"],
+            "remaining_work": ["Implement runtime"],
+            "constraints": ["No dependencies"],
+            "decisions": ["Use byte budgets"],
+            "blockers": ["Host trust is unverified"],
+            "authoritative_files": ["write_handoff.py::validate_structural_readiness"],
+            "validation_evidence": [],
+            "resume_validation": {
+                "command": "python3 focused_test.py",
+                "expected": "exit 0 and 7 tests pass",
+            },
+            "next_action": "Implement the exact resume contract",
+        }
+
+        ready = validate_structural_readiness(state, session_id="session-a")
+        self.assertTrue(ready["resume_ready"])
+        for missing in ("command", "expected"):
+            with self.subTest(missing=missing):
+                invalid = dict(state)
+                invalid["resume_validation"] = {
+                    "command": "" if missing == "command" else "python3 focused_test.py",
+                    "expected": "" if missing == "expected" else "exit 0 and 7 tests pass",
+                }
+                outcome = validate_structural_readiness(invalid, session_id="session-a")
+                self.assertFalse(outcome["resume_ready"])
+                self.assertIn(f"missing:resume_validation.{missing}", outcome["failures"])
+
     def test_trim_lines_returns_text_unchanged_within_limit(self) -> None:
         text = "first\nsecond\n"
         self.assertEqual(trim_lines(text, 2), text)
@@ -501,7 +620,8 @@ class WriteHandoffTests(unittest.TestCase):
             self.assertLess(opening, middle)
             self.assertLess(middle, closing)
             self.assertIn(f"Transfer ID: {transfer_id}", content[closing:])
-            self.assertIn("Smallest validation:", content[closing:])
+            self.assertIn("Resume validation command:", content[closing:])
+            self.assertIn("Resume validation expected:", content[closing:])
             self.assertIn("sole writer only after exact acknowledgement", content[closing:])
             self.assertIn(f"Expected transfer ID: {transfer_id}.", prompt)
             self.assertIn("Source authoritative/destination control-only", prompt)
@@ -761,7 +881,11 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
             "decisions": ["Use byte budgets"],
             "blockers": ["Host trust is unverified"],
             "authoritative_files": ["skills/checkpoint-and-continue/scripts/context_handoff.py::main"],
-            "validation": ["Tests collected"],
+            "validation_evidence": ["Tests collected"],
+            "resume_validation": {
+                "command": "python3 focused_test.py",
+                "expected": "exit 0 and 7 tests pass",
+            },
             "next_action": "Implement validate_structural_readiness",
         }
 
@@ -818,7 +942,11 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
             "decisions": ["Use byte budgets"],
             "blockers": ["Host trust is unverified"],
             "authoritative_files": ["skills/checkpoint-and-continue/scripts/context_handoff.py::main"],
-            "validation": ["Tests collected"],
+            "validation_evidence": ["Tests collected"],
+            "resume_validation": {
+                "command": "python3 focused_test.py",
+                "expected": "exit 0 and 7 tests pass",
+            },
             "next_action": "Implement validate_structural_readiness",
         }
 
@@ -835,6 +963,41 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
 
 
 class ContextHandoffTests(unittest.TestCase):
+    def test_validation_evidence_legacy_read_does_not_synthesize_resume_validation(self) -> None:
+        import context_handoff as context_module
+
+        args = argparse.Namespace(
+            session_id="legacy-session",
+            objective="",
+            active_task="",
+            phase="",
+            status="",
+            completion_criteria=[],
+            completed_work=[],
+            remaining_work=[],
+            constraints=[],
+            decisions=[],
+            blockers=[],
+            authoritative_files=[],
+            validation_evidence=[],
+            resume_validation_command="",
+            resume_validation_expected="",
+            next_step="",
+            goal_objective="",
+            goal_identity="goal-id",
+        )
+        state = context_module.merge_state(
+            args,
+            {
+                "validation": ["Historical legacy validation"],
+                "next_step": "Continue the legacy action",
+            },
+        )
+
+        self.assertEqual(state["validation_evidence"], ["Historical legacy validation"])
+        self.assertEqual(state["next_action"], "Continue the legacy action")
+        self.assertEqual(state["resume_validation"], {"command": "", "expected": ""})
+
     def test_authoritative_revision_stale_current_new(self) -> None:
         import context_handoff as context_module
 
@@ -1246,9 +1409,19 @@ class ContextHandoffTests(unittest.TestCase):
                 "capsule_body",
                 "objective",
                 "active_task",
-                "next_action",
             ):
                 self.assertNotIn(forbidden, keys)
+            self.assertEqual(
+                record["next_action"],
+                "Implement deterministic capsule budgeting in build_markdown",
+            )
+            self.assertEqual(
+                record["resume_validation"],
+                {
+                    "command": "python3 focused_test.py",
+                    "expected": "exit 0 and 7 tests pass",
+                },
+            )
             self.assertNotIn(str(prompt), pointer_text)
 
     def test_dedup_reuses_recent_handoff_but_allows_later_handoffs(self) -> None:
