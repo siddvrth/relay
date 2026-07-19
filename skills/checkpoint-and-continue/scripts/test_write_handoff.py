@@ -1134,6 +1134,128 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
 
 
 class ContextHandoffTests(unittest.TestCase):
+    def test_timing_strategy_matrix_is_deterministic_and_budget_independent(self) -> None:
+        import context_handoff as context_module
+
+        for trigger in ("manual", "pre-compact"):
+            with self.subTest(strategy=trigger, telemetry="missing"):
+                self.assertTrue(
+                    context_module.should_trigger_handoff(
+                        trigger=trigger,
+                        context_ratio=None,
+                        threshold=0.30,
+                        force=False,
+                    )
+                )
+
+        invalid_telemetry: tuple[dict[str, object], ...] = (
+            {},
+            {"contextUsed": "unknown"},
+            {"contextUsed": "nan"},
+            {"context_usage_percent": 101},
+            {"context_tokens": 31, "context_window_size": 0},
+        )
+        for payload in invalid_telemetry:
+            with self.subTest(strategy="threshold", telemetry=payload):
+                ratio = context_module.extract_context_used(payload)
+                self.assertIsNone(ratio)
+                self.assertFalse(
+                    context_module.should_trigger_handoff(
+                        trigger="threshold",
+                        context_ratio=ratio,
+                        threshold=0.30,
+                        force=False,
+                    )
+                )
+
+        for threshold in (0.30, 0.50, 0.70):
+            for label, ratio, expected in (
+                ("threshold-epsilon", threshold - 0.001, False),
+                ("exact-threshold", threshold, True),
+                ("threshold-plus-epsilon", threshold + 0.001, True),
+            ):
+                with self.subTest(threshold=threshold, boundary=label):
+                    self.assertIs(
+                        context_module.should_trigger_handoff(
+                            trigger="threshold",
+                            context_ratio=ratio,
+                            threshold=threshold,
+                            force=False,
+                        ),
+                        expected,
+                    )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            init_repo(repo)
+            for index, (capsule_budget, prompt_budget) in enumerate(
+                ((4096, 1024), (4095, 1023))
+            ):
+                with self.subTest(
+                    capsule_budget=capsule_budget,
+                    prompt_budget=prompt_budget,
+                ):
+                    args = replace_arg(
+                        rich_context_args(repo),
+                        "--session-id",
+                        f"timing-budget-{index}",
+                    )
+                    result = run_context_handoff(
+                        *args,
+                        "--stdin-json",
+                        "--dedup-seconds",
+                        "0",
+                        "--handoff-threshold",
+                        "0.50",
+                        "--capsule-budget-bytes",
+                        str(capsule_budget),
+                        "--prompt-budget-bytes",
+                        str(prompt_budget),
+                        stdin=json.dumps(
+                            {
+                                "session_id": f"timing-budget-{index}",
+                                "prompt": "continue",
+                                "contextUsed": 0.50,
+                            }
+                        ),
+                    )
+                    payload = json_payload(result)
+                    self.assertEqual(payload["context_used_ratio"], 0.50)
+                    self.assertIs(payload["should_handoff"], True)
+
+    def test_timing_strategy_matrix_documentation_contract(self) -> None:
+        documents = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (
+                REPO / "README.md",
+                REPO / "docs/metrics.md",
+                REPO / "docs/lifecycle.md",
+                SKILL_ROOT / "reference.md",
+            )
+        )
+        normalized = documents.lower().replace("`", "")
+        for required in (
+            "no proactive handoff",
+            "0.30",
+            "0.50",
+            "0.70",
+            "precompact-only",
+            "milestone",
+            "experimental generic default",
+            "numeric overrides",
+            "no threshold is proven optimal",
+            "missing telemetry cannot support a threshold claim",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, normalized)
+        for forbidden in (
+            "30% is optimal",
+            "optimal threshold",
+            "byte budget determines the threshold",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, normalized)
+
     def test_validation_evidence_legacy_read_does_not_synthesize_resume_validation(self) -> None:
         import context_handoff as context_module
 

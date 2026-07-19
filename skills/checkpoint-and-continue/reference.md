@@ -8,7 +8,7 @@ This is the low-level v2 contract for the `checkpoint-and-continue` skill. Start
 | --- | ---: | --- |
 | `--capsule-budget-bytes` | `4096` | Encoded UTF-8 capsule limit; may be lowered, never raised above 4096 |
 | `--prompt-budget-bytes` | `1024` | Transported prompt limit; may be lowered, never raised above 1024 |
-| `--handoff-threshold` | `0.30` | Experimental automatic trigger ratio when compatible host telemetry exists |
+| `--handoff-threshold` | `0.30` | Experimental generic default when compatible host telemetry exists; `0.50` and `0.70` are numeric overrides |
 | `--dedup-seconds` | `300` | Session-scoped transport cooldown |
 
 Changing a byte budget does not change the threshold. Overrides above the canonical 4096/1024-byte ceilings are rejected before state or delivery is written; official hooks fail open without additional context. Approximate tokens are reported as telemetry only; they never determine fit or readiness. Capsule readiness does not guarantee transport readiness: the mandatory prompt must fit independently.
@@ -95,7 +95,9 @@ Therefore one delivery per cooldown does not mean one revision per cooldown. A n
 
 Ratios accept `0.31`, `31`, or `31%`. Names ending in `Percent`, plus `context_usage_percent`, always use a `0..100` scale, so `1` means 1%.
 
-These fields are compatibility inputs, not a documented Codex guarantee. Current [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) says every command hook receives `session_id`; `UserPromptSubmit` additionally has `prompt`, but it does not document a context ratio. Without compatible ratio telemetry, a threshold-triggered `UserPromptSubmit` does not claim an exact 30% decision. `PreCompact` is the deterministic documented fallback.
+These fields are compatibility inputs, not a documented Codex guarantee. Current [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) says every command hook receives `session_id`; `UserPromptSubmit` additionally has `prompt`, but it does not document a context ratio. Missing telemetry cannot support a threshold claim: threshold mode stays inactive for missing or invalid ratios. Manual milestone and `PreCompact` triggers remain deterministic without ratio telemetry.
+
+The timing experiment compares exactly six conditions: no proactive handoff, `0.30`, `0.50`, `0.70`, `PreCompact`-only, and milestone. `0.30` is the experimental generic default; `0.50` and `0.70` are numeric overrides, and no threshold is proven optimal. The 4096/1024-byte budgets are independent storage/transport limits and do not alter trigger decisions.
 
 ## Internal JSON Contract
 

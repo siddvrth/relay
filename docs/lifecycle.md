@@ -19,9 +19,11 @@ This state is stored under the hashed session directory, not in a repo-global ac
 
 ## 2. Refresh A Revision
 
-A manual milestone, compatible threshold event, or `PreCompact` can invoke the orchestrator. Every ready revision is a self-contained capsule at or below 4096 UTF-8 bytes.
+A manual milestone, compatible threshold event, or `PreCompact` can invoke the orchestrator. Manual milestone and `PreCompact` are deterministic triggers that do not require ratio telemetry. Every ready revision is a self-contained capsule at or below 4096 UTF-8 bytes.
 
-The experimental `0.30` threshold applies only when the host provides compatible context-ratio telemetry. Official `UserPromptSubmit` does not document that field, so absence of a ratio is not evidence that the threshold has or has not been reached. `PreCompact` is the deterministic documented fallback.
+The experimental generic default `0.30` threshold applies only when the host provides compatible context-ratio telemetry. `0.50` and `0.70` are numeric overrides, not named strategies. Official `UserPromptSubmit` does not document that field, so missing telemetry cannot support a threshold claim and threshold mode remains inactive for missing or invalid ratios. No threshold is proven optimal.
+
+Timing experiments compare exactly six conditions: no proactive handoff, `0.30`, `0.50`, `0.70`, `PreCompact`-only, and milestone. The 4096-byte capsule and 1024-byte prompt budgets govern storage/transport fit independently; they do not change the trigger comparison.
 
 Structural guards run before readiness is reported. Critical overflow writes safe metadata with `resume_ready:false` and a content-addressed path/hash; it does not produce a continuation prompt. Optional evidence can overflow while a complete kernel remains ready, unless even the overflow reference cannot fit—in that case compact non-ready metadata is emitted.
 

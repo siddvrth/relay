@@ -58,7 +58,7 @@ All counts and token components are non-negative integers. Applicable latencies 
 
 The evidence document may be committed after the candidate in an evidence-only release commit. Candidate ancestry plus the no-drift and artifact checks prevent that allowance from weakening runtime or preregistration binding.
 
-Diagnostic conditions—no proactive handoff, compatible `0.30`, later thresholds, `PreCompact`-only, inherited/forked context, current canonical, edge-structured candidate, and beginning/middle/end fact positions—must use a non-claim condition label and `qualifies_as_claim_evidence:false`. They are reported separately and never enter the canonical paired sign test unless a future study separately preregisters and powers them.
+The timing experiment has exactly six diagnostic conditions: no proactive handoff, compatible `0.30`, compatible `0.50`, compatible `0.70`, `PreCompact`-only, and milestone. The `0.30` condition is the experimental generic default; `0.50` and `0.70` are numeric overrides. Manual milestone and `PreCompact` conditions are deterministic and do not require ratio telemetry. Every condition uses a non-claim label and `qualifies_as_claim_evidence:false`; none enters the canonical paired sign test unless a future study separately preregisters and powers it. Other diagnostics, including inherited/forked context, current canonical, edge-structured candidate, and beginning/middle/end fact positions, remain separately labeled non-claim observations rather than additional timing conditions.
 
 ## Quality Rubric
 
@@ -114,6 +114,8 @@ python3 skills/checkpoint-and-continue/scripts/goal_telemetry_report.py \
 
 Recheck current official rates before any sensitivity report. Never describe those scenarios as a Codex bill.
 
-## Experimental Threshold
+## Experimental Timing Conditions
 
-The `0.30` used-context threshold is a host-dependent safety policy, not a payload budget and not a proven optimum. Official `UserPromptSubmit` does not document a context ratio. A future calibration study should compare identical multi-step tasks across no proactive handoff, compatible 30% telemetry, later compatible thresholds, and `PreCompact`-only behavior while preserving failures and quality outcomes.
+The `0.30` used-context threshold is a host-dependent experimental generic default, not a payload budget. `0.50` and `0.70` are numeric overrides for the same comparison rule, not named strategies. No threshold is proven optimal. Official `UserPromptSubmit` does not document a context ratio, so missing telemetry cannot support a threshold claim and threshold mode does not trigger from absence or invalid data.
+
+Compare identical multi-step tasks across the six frozen conditions: no proactive handoff, compatible `0.30`, compatible `0.50`, compatible `0.70`, `PreCompact`-only, and milestone. Manual milestone and `PreCompact` are deterministic; the three numeric conditions require compatible telemetry. Preserve failures and quality outcomes. Capsule/prompt budgets remain independent storage/transport controls and never select a timing condition.

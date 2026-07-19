@@ -11,14 +11,16 @@ The product name is `fresh-handoff`; the bundled skill is `checkpoint-and-contin
 | Capsule budget | 4096 encoded UTF-8 bytes |
 | Continuation prompt budget | 1024 encoded UTF-8 bytes, one copy per transport |
 | Resume shape | Self-contained, session-scoped revision |
-| Automatic threshold | Experimental `0.30` used-context ratio when the host supplies compatible telemetry |
-| Deterministic fallback | Every `PreCompact` advances the session revision before compaction |
+| Automatic threshold | Experimental generic default `0.30`; `0.50` and `0.70` are numeric overrides when the host supplies compatible telemetry |
+| Deterministic triggers | A manual milestone and every `PreCompact` invoke refresh without ratio telemetry |
 | Safety on critical overflow | `resume_ready:false`; no autonomous task switch |
 | Ownership transfer | Destination becomes sole writer only after exact acknowledgement |
 | Dependencies | Python standard library plus small Bash wrappers |
 | Hosts | Codex App and Codex CLI/OMX |
 
-The `0.30` policy is host-dependent. Official [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) documents `session_id` on hook input and `prompt` on `UserPromptSubmit`, but not a context-used ratio. The adapters accept additional ratio fields for host compatibility without presenting them as a Codex guarantee.
+The `0.30` policy is a host-dependent experimental generic default. `0.50` and `0.70` are numeric overrides, not named strategies. Official [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) documents `session_id` on hook input and `prompt` on `UserPromptSubmit`, but not a context-used ratio. The adapters accept additional ratio fields for host compatibility without presenting them as a Codex guarantee. Manual milestone and `PreCompact` triggers are deterministic because they do not require ratio telemetry.
+
+Timing evaluation uses six separate non-claim conditions: no proactive handoff, `0.30`, `0.50`, `0.70`, `PreCompact`-only, and milestone. No threshold is proven optimal, and missing telemetry cannot support a threshold claim. The 4096/1024-byte storage and transport budgets do not determine timing.
 
 ## What A Ready Capsule Preserves
 
