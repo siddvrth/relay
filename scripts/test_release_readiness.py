@@ -9,6 +9,7 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -220,7 +221,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             PROJECT_ROOT,
             root,
             ignore=shutil.ignore_patterns(
-                ".git", ".agents", ".omx", ".DS_Store", "__pycache__"
+                ".git", ".agents", ".omo", ".omx", ".DS_Store", "__pycache__"
             ),
         )
         self.git(root, "init", "-q")
@@ -283,6 +284,32 @@ class ReleaseReadinessTests(unittest.TestCase):
             result = self.assess(Path(temp))
         self.assertIn("plugin manifest is missing", result["blockers"])
 
+    def test_v2_push_validation_is_required(self) -> None:
+        error = release.assess_ci_validation_workflow(PROJECT_ROOT)
+
+        self.assertIsNone(error)
+
+    def test_workflow_without_v2_push_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            workflow = root / ".github" / "workflows" / "validate.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "name: validate\n\n"
+                "on:\n"
+                "  push:\n"
+                "    branches:\n"
+                "      - main\n",
+                encoding="utf-8",
+            )
+
+            result = self.assess(root)
+
+        self.assertIn(
+            "CI validation workflow must run on pushes to exactly main and v2",
+            result["blockers"],
+        )
+
     def test_malformed_manifest_is_a_structured_blocker(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -321,7 +348,9 @@ class ReleaseReadinessTests(unittest.TestCase):
             shutil.copytree(
                 PROJECT_ROOT,
                 root,
-                ignore=shutil.ignore_patterns(".git", ".agents", ".omx", ".DS_Store", "__pycache__"),
+                ignore=shutil.ignore_patterns(
+                    ".git", ".agents", ".omo", ".omx", ".DS_Store", "__pycache__"
+                ),
             )
             manifest_path = root / ".codex-plugin" / "plugin.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1063,4 +1092,12 @@ class ReleaseReadinessTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    test_argv = sys.argv
+    if len(test_argv) >= 3 and test_argv[1] == "-k" and " or " in test_argv[2]:
+        patterns = test_argv[2].split(" or ")
+        test_argv = [
+            test_argv[0],
+            *(item for pattern in patterns for item in ("-k", pattern)),
+            *test_argv[3:],
+        ]
+    unittest.main(argv=test_argv)

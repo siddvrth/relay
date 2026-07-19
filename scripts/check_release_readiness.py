@@ -184,6 +184,13 @@ MODAL_CLAIM_PREFIX_PATTERN = re.compile(
     r"\b(?:may|can|could)\s*$",
     re.IGNORECASE,
 )
+PUSH_BRANCHES_PATTERN = re.compile(
+    r"^  push:\s*$\n"
+    r"(?:^    (?!branches:).*$\n)*"
+    r"^    branches:\s*$\n"
+    r"(?P<branches>(?:^      -\s+.+$\n?)+)",
+    re.MULTILINE,
+)
 from goal_telemetry_report import (  # noqa: E402
     V2_SCHEMA_VERSION,
     V2_STUDY_TYPE,
@@ -229,6 +236,26 @@ def assess_release_policy(root: Path) -> dict[str, object]:
         "path": str(path),
         "error": None if valid else "release policy schema or values are invalid",
     }
+
+
+def assess_ci_validation_workflow(root: Path) -> str | None:
+    path = root / ".github" / "workflows" / "validate.yml"
+    if not path.is_file():
+        return "CI validation workflow is missing"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return "CI validation workflow is unreadable"
+    match = PUSH_BRANCHES_PATTERN.search(text)
+    if match is None:
+        return "CI validation workflow must run on pushes to exactly main and v2"
+    branches = [
+        line.split("-", maxsplit=1)[1].strip().strip("'\"")
+        for line in match.group("branches").splitlines()
+    ]
+    if len(branches) != 2 or set(branches) != {"main", "v2"}:
+        return "CI validation workflow must run on pushes to exactly main and v2"
+    return None
 
 
 def _claim_offsets(text: str) -> Iterator[int]:
@@ -854,8 +881,9 @@ def assess(root: Path = ROOT) -> dict[str, object]:
     if status.stdout.strip():
         blockers.append("working tree is not clean")
 
-    if not (root / ".github" / "workflows" / "validate.yml").is_file():
-        blockers.append("CI validation workflow is missing")
+    workflow_error = assess_ci_validation_workflow(root)
+    if workflow_error is not None:
+        blockers.append(workflow_error)
 
     if not (root / "hooks" / "hooks.json").is_file():
         blockers.append("plugin hook manifest is missing")
