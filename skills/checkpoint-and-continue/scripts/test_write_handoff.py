@@ -765,34 +765,31 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
             "next_action": "Implement validate_structural_readiness",
         }
 
-        valid = guard(base, session_id="session-a", latest_revision=2)
+        valid = guard(base, session_id="session-a")
         self.assertTrue(valid["resume_ready"])
         self.assertEqual(valid["failures"], [])
 
-        cases: list[tuple[str, dict[str, object], str, int, str]] = []
+        cases: list[tuple[str, dict[str, object], str, str]] = []
         missing = dict(base)
         del missing["completion_criteria"]
-        cases.append(("missing", missing, "session-a", 2, "missing"))
+        cases.append(("missing", missing, "session-a", "missing"))
         placeholder = dict(base, objective="TBD")
-        cases.append(("placeholder", placeholder, "session-a", 2, "placeholder"))
+        cases.append(("placeholder", placeholder, "session-a", "placeholder"))
         circular = dict(
             base,
             next_action="Read this checkpoint and continue from the recorded Next Action",
         )
-        cases.append(("circular", circular, "session-a", 2, "circular"))
+        cases.append(("circular", circular, "session-a", "circular"))
         cross_session = dict(base)
-        cases.append(("cross-session", cross_session, "session-b", 2, "session"))
-        stale = dict(base, revision=1)
-        cases.append(("stale", stale, "session-a", 2, "stale"))
+        cases.append(("cross-session", cross_session, "session-b", "session"))
         overlap = dict(base, remaining_work=["Added fixtures"])
-        cases.append(("overlap", overlap, "session-a", 2, "overlap"))
+        cases.append(("overlap", overlap, "session-a", "overlap"))
 
-        for label, state, session_id, revision, reason_fragment in cases:
+        for label, state, session_id, reason_fragment in cases:
             with self.subTest(label=label):
                 outcome = guard(
                     state,
                     session_id=session_id,
-                    latest_revision=revision,
                 )
                 self.assertFalse(outcome["resume_ready"])
                 failures = " ".join(str(value) for value in outcome["failures"])
@@ -800,8 +797,217 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
                 self.assertNotIn("semantic contradiction", failures.lower())
                 self.assertNotIn("boilerplate", failures.lower())
 
+    def test_writer_revision_is_structural_and_bool_safe(self) -> None:
+        import context_handoff as context_module
+
+        guard = context_module.validate_structural_readiness
+        base: dict[str, object] = {
+            "session_id": "session-a",
+            "revision": 1,
+            "transfer_nonce": "abcdefghijklmnopqrstuv",
+            "transfer_id": "r1-" + hashlib.sha256(b"abcdefghijklmnopqrstuv").hexdigest()[:16],
+            "goal_identity": "goal:sha256:" + ("a" * 64),
+            "objective": "Ship the handoff",
+            "active_task": "Implement structural readiness",
+            "phase": "verification",
+            "status": "in progress",
+            "completion_criteria": ["All tests pass"],
+            "completed_work": ["Added fixtures"],
+            "remaining_work": ["Implement runtime"],
+            "constraints": ["No dependencies"],
+            "decisions": ["Use byte budgets"],
+            "blockers": ["Host trust is unverified"],
+            "authoritative_files": ["skills/checkpoint-and-continue/scripts/context_handoff.py::main"],
+            "validation": ["Tests collected"],
+            "next_action": "Implement validate_structural_readiness",
+        }
+
+        self.assertTrue(guard(base, session_id="session-a")["resume_ready"])
+        for revision in (True, False, 0, -1):
+            with self.subTest(revision=revision):
+                outcome = guard({**base, "revision": revision}, session_id="session-a")
+                self.assertFalse(outcome["resume_ready"])
+                self.assertIn("missing:revision", outcome["failures"])
+
+        writer_source = WRITE_HANDOFF.read_text(encoding="utf-8")
+        self.assertNotIn("latest_revision", writer_source)
+        self.assertNotIn("stale:revision", writer_source)
+
 
 class ContextHandoffTests(unittest.TestCase):
+    def test_authoritative_revision_stale_current_new(self) -> None:
+        import context_handoff as context_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            init_repo(repo)
+            session_id = "authoritative-revision"
+            args = replace_arg(rich_context_args(repo), "--session-id", session_id)
+            json_payload(run_context_handoff(*args, "--trigger", "pre-compact"))
+            current_payload = json_payload(
+                run_context_handoff(*args, "--trigger", "pre-compact")
+            )
+            paths = context_module.state_paths(repo, session_id)
+            durable = json.loads(paths.revision.read_text(encoding="utf-8"))
+            self.assertEqual(durable["revision"], 2)
+
+            stale_intent = {
+                "version": 1,
+                "session_id": session_id,
+                "source_session_id": session_id,
+                "state_sha256": durable["state_sha256"],
+                "goal_identity": durable["goal_identity"],
+                "revision": 1,
+                "capsule_path": str(paths.session_dir / "stale-r1-handoff.md"),
+                "transfer_nonce": "stale-revision-nonce-1234",
+                "writer_complete": False,
+            }
+            paths.prepare_intent.write_text(
+                json.dumps(stale_intent, sort_keys=True),
+                encoding="utf-8",
+            )
+            before = {
+                path: path.read_bytes()
+                for path in (
+                    paths.revision,
+                    paths.session_pointer,
+                    paths.latest_pointer,
+                    paths.prepare_intent,
+                )
+            }
+
+            stale = run_context_handoff(*args, "--trigger", "pre-compact")
+
+            self.assertNotEqual(stale.returncode, 0)
+            stale_error = json.loads(stale.stdout)
+            self.assertEqual(
+                stale_error["error"],
+                "prepare intent conflicts with current handoff state",
+            )
+            self.assertEqual(
+                before,
+                {path: path.read_bytes() for path in before},
+            )
+
+            current_intent = {
+                "version": 1,
+                "session_id": session_id,
+                "source_session_id": session_id,
+                "state_sha256": durable["state_sha256"],
+                "goal_identity": durable["goal_identity"],
+                "revision": 2,
+                "capsule_path": current_payload["capsule_path"],
+                "transfer_nonce": current_payload["transfer_nonce"],
+                "writer_complete": True,
+                "write_result": current_payload,
+            }
+            paths.prepare_intent.write_text(
+                json.dumps(current_intent, sort_keys=True),
+                encoding="utf-8",
+            )
+            retried = json_payload(
+                run_context_handoff(*args, "--trigger", "pre-compact")
+            )
+            self.assertEqual(retried["revision"], 2)
+            self.assertEqual(retried["capsule_path"], current_payload["capsule_path"])
+            self.assertEqual(retried["transfer_nonce"], current_payload["transfer_nonce"])
+            self.assertFalse(paths.prepare_intent.exists())
+
+            allocated = json_payload(
+                run_context_handoff(*args, "--trigger", "pre-compact")
+            )
+            self.assertEqual(allocated["revision"], 3)
+            self.assertEqual(
+                json.loads(paths.revision.read_text(encoding="utf-8"))["revision"],
+                3,
+            )
+
+    def test_authoritative_revision_rejects_bool_state_and_intent(self) -> None:
+        import context_handoff as context_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            init_repo(repo)
+            session_id = "bool-revision"
+            args = replace_arg(rich_context_args(repo), "--session-id", session_id)
+            first = json_payload(
+                run_context_handoff(*args, "--trigger", "pre-compact")
+            )
+            paths = context_module.state_paths(repo, session_id)
+            durable = json.loads(paths.revision.read_text(encoding="utf-8"))
+            bool_intent = {
+                "version": 1,
+                "session_id": session_id,
+                "source_session_id": session_id,
+                "state_sha256": durable["state_sha256"],
+                "goal_identity": durable["goal_identity"],
+                "revision": True,
+                "capsule_path": first["capsule_path"],
+                "transfer_nonce": first["transfer_nonce"],
+                "writer_complete": True,
+                "write_result": first,
+            }
+            paths.prepare_intent.write_text(
+                json.dumps(bool_intent, sort_keys=True),
+                encoding="utf-8",
+            )
+            revision_before = paths.revision.read_bytes()
+
+            rejected = run_context_handoff(*args, "--trigger", "pre-compact")
+
+            self.assertNotEqual(rejected.returncode, 0)
+            rejected_error = json.loads(rejected.stdout)
+            self.assertEqual(
+                rejected_error["error"],
+                "prepare intent conflicts with current handoff state",
+            )
+            self.assertEqual(paths.revision.read_bytes(), revision_before)
+
+            durable_session_id = "bool-durable-revision"
+            durable_args = replace_arg(
+                rich_context_args(repo),
+                "--session-id",
+                durable_session_id,
+            )
+            durable_paths = context_module.state_paths(repo, durable_session_id)
+            durable_paths.session_dir.mkdir(parents=True)
+            durable_paths.lock.touch()
+            durable_paths.revision.write_text(
+                json.dumps({**durable, "revision": True}, sort_keys=True),
+                encoding="utf-8",
+            )
+            allocated = json_payload(
+                run_context_handoff(*durable_args, "--trigger", "pre-compact")
+            )
+            self.assertEqual(allocated["revision"], 1)
+            self.assertIs(type(allocated["revision"]), int)
+
+    def test_concurrent_revision_allocation_is_contiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            init_repo(repo)
+            session_id = "concurrent-revisions"
+            args = replace_arg(rich_context_args(repo), "--session-id", session_id)
+
+            def allocate(_index: int) -> dict[str, object]:
+                return json_payload(
+                    run_context_handoff(*args, "--trigger", "pre-compact")
+                )
+
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                results = list(pool.map(allocate, range(6)))
+
+            revisions = sorted(item["revision"] for item in results)
+            self.assertEqual(revisions, list(range(1, 7)))
+            self.assertTrue(all(type(revision) is int for revision in revisions))
+            self.assertEqual(len(set(revisions)), len(revisions))
+            _pointer_path, pointer = find_latest_pointer(repo)
+            self.assertEqual(pointer["revision"], 6)
+            capsules = list(
+                (repo / ".omx/state/checkpoint-and-continue").rglob("*-handoff.md")
+            )
+            self.assertEqual(len(capsules), 6)
+
     def test_context_handoff_blocks_below_30(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

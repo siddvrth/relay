@@ -852,7 +852,7 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
         previous_revision = read_json(paths.revision) or {}
         previous_pointer = read_json(paths.session_pointer) or {}
         last_revision = previous_revision.get("revision", 0)
-        if not isinstance(last_revision, int) or last_revision < 0:
+        if type(last_revision) is not int or last_revision < 0:
             last_revision = 0
 
         delivery_recent = recently_handed_off(paths.delivery, args.dedup_seconds)
@@ -881,7 +881,7 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
                 or prepare_intent.get("source_session_id") != source_session_id
                 or prepare_intent.get("state_sha256") != state_hash
                 or prepare_intent.get("goal_identity") != state["goal_identity"]
-                or not isinstance(intent_revision, int)
+                or type(intent_revision) is not int
                 or intent_revision < 1
                 or intent_revision not in {last_revision, last_revision + 1}
                 or not isinstance(prepare_intent.get("transfer_nonce"), str)

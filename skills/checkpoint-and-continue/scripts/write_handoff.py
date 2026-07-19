@@ -426,13 +426,12 @@ def validate_structural_readiness(
     state: dict[str, Any],
     *,
     session_id: str,
-    latest_revision: int,
 ) -> dict[str, Any]:
     failures: list[str] = []
     for field in CRITICAL_FIELDS:
         value = state.get(field)
         if field == "revision":
-            if not isinstance(value, int) or value < 1:
+            if type(value) is not int or value < 1:
                 failures.append("missing:revision")
             continue
         if field in {
@@ -460,10 +459,6 @@ def validate_structural_readiness(
     state_session = str(state.get("session_id", ""))
     if state_session and session_id and state_session != session_id:
         failures.append("session:mismatch")
-
-    revision = state.get("revision")
-    if isinstance(revision, int) and revision < latest_revision:
-        failures.append("stale:revision")
 
     next_action = _normalized_text(state.get("next_action", ""))
     if "checkpoint" in next_action and (
@@ -677,7 +672,6 @@ def build_bounded_capsule(
     guard = validate_structural_readiness(
         state,
         session_id=args.session_id,
-        latest_revision=args.revision,
     )
     kernel = render_kernel(
         state,
