@@ -47,14 +47,17 @@ CRITICAL_FIELDS = (
     "phase",
     "status",
     "completion_criteria",
-    "completed_work",
     "remaining_work",
     "constraints",
-    "decisions",
-    "blockers",
     "authoritative_files",
     "resume_validation",
     "next_action",
+)
+OPTIONAL_SECTIONS = (
+    ("completed_work", "Completed Work"),
+    ("decisions", "Decisions"),
+    ("blockers", "Blockers / Risks"),
+    ("validation_evidence", "Validation Evidence"),
 )
 
 PLACEHOLDERS = {
@@ -432,6 +435,8 @@ def _as_list(value: Any) -> list[str]:
 
 
 def _normalized_text(value: Any) -> str:
+    if value is None:
+        return ""
     return " ".join(str(value).strip().lower().split())
 
 
@@ -449,11 +454,8 @@ def validate_structural_readiness(
             continue
         if field in {
             "completion_criteria",
-            "completed_work",
             "remaining_work",
             "constraints",
-            "decisions",
-            "blockers",
             "authoritative_files",
         }:
             values = _as_list(value)
@@ -568,16 +570,22 @@ def render_kernel(
     for title, values in opening:
         sections.extend(["", f"### {title}", "", _markdown_list(values)])
 
-    middle = (
+    middle = [
         ("Active Task", [state["active_task"]]),
-        ("Completed Work", state["completed_work"]),
         ("Remaining Work", state["remaining_work"]),
-        ("Decisions", state["decisions"]),
-        ("Blockers / Risks", state["blockers"]),
         ("Authoritative Files / Symbols", state["authoritative_files"]),
-        ("Validation Evidence", state["validation_evidence"]),
-    )
+    ]
+    absent_optional = []
+    for field, title in OPTIONAL_SECTIONS:
+        if state[field]:
+            middle.append((title, state[field]))
+        else:
+            absent_optional.append(field)
     sections.extend(["", "## Supporting State"])
+    if absent_optional:
+        sections.extend(
+            ["", "Absent optional state: " + ", ".join(absent_optional)]
+        )
     for title, values in middle:
         sections.extend(["", f"### {title}", "", _markdown_list(values)])
 
@@ -772,18 +780,6 @@ def build_bounded_capsule(
     return content, bool(guard["resume_ready"]), overflow, guard
 
 
-def truncate_utf8(text: str, budget: int) -> str:
-    encoded = text.encode("utf-8")
-    if len(encoded) <= budget:
-        return text
-    marker = "\n[truncated to prompt byte budget]"
-    marker_bytes = marker.encode("utf-8")
-    if budget <= len(marker_bytes):
-        return marker_bytes[:budget].decode("utf-8", errors="ignore")
-    kept = encoded[: budget - len(marker_bytes)]
-    return kept.decode("utf-8", errors="ignore") + marker
-
-
 def build_continuation_prompt(
     out_path: Path,
     goal_objective: str | None,
@@ -800,14 +796,10 @@ def build_continuation_prompt(
     resume_validation_expected: str = "",
 ) -> str | None:
     mandatory_lines = [
-        f"Use $checkpoint-and-continue. Continue from {out_path}.",
-        "Read AGENTS.md + capsule; inspect repo/goal.",
-        f"Expected session: {session_id or 'default'}.",
-        f"Expected revision: {revision if revision is not None else 'unspecified'}.",
-        f"Expected capsule SHA-256: {capsule_sha256}.",
-        f"Expected goal identity: {goal_identity}.",
-        f"Expected transfer nonce: {transfer_nonce}.",
-        f"Expected transfer ID: {transfer_id}.",
+        f"Use $checkpoint-and-continue from {out_path}; read AGENTS.md + capsule; inspect repo/goal.",
+        f"Expected session: {session_id or 'default'}. Expected revision: {revision if revision is not None else 'unspecified'}.",
+        f"Expected capsule SHA-256: {capsule_sha256}. Expected goal identity: {goal_identity}.",
+        f"Expected transfer nonce: {transfer_nonce}. Expected transfer ID: {transfer_id}.",
         "Verify SHA-256 + identity.",
         f"Exact next action: {next_action}.",
         f"Resume validation command: {resume_validation_command}.",
@@ -819,15 +811,7 @@ def build_continuation_prompt(
     mandatory_bytes = len(mandatory.encode("utf-8"))
     if mandatory_bytes > prompt_budget_bytes:
         return None
-    if not goal_objective:
-        return mandatory
-
-    prefix = "\nContinue the recorded goal objective: "
-    available = prompt_budget_bytes - mandatory_bytes - len(prefix.encode("utf-8"))
-    if available <= 0:
-        return mandatory
-    optional_goal = truncate_utf8(goal_objective, available)
-    return mandatory + prefix + optional_goal
+    return mandatory
 
 
 def _base_metrics(

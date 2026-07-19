@@ -292,6 +292,177 @@ def find_latest_pointer(repo: Path) -> tuple[Path, dict[str, object]]:
 
 
 class WriteHandoffTests(unittest.TestCase):
+    def test_beginning_middle_near_completion_without_filler(self) -> None:
+        profiles = (
+            (
+                "beginning",
+                ("--completed-work", "--decisions", "--blockers", "--validation-status"),
+                ("completed_work", "decisions", "blockers", "validation_evidence"),
+            ),
+            (
+                "middle",
+                ("--blockers",),
+                ("blockers",),
+            ),
+            (
+                "near-completion",
+                ("--decisions", "--blockers"),
+                ("decisions", "blockers"),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            init_repo(repo)
+            for label, omitted_flags, absent_fields in profiles:
+                with self.subTest(label=label):
+                    args = rich_handoff_args(repo, session_id=f"optional-{label}")
+                    for flag in omitted_flags:
+                        args = remove_arg(args, flag, takes_value=True)
+
+                    payload = json_payload(run_write_handoff(*args))
+
+                    self.assertIs(payload["resume_ready"], True)
+                    capsule = Path(str(payload["capsule_path"]))
+                    capsule_text = capsule.read_text(encoding="utf-8")
+                    self.assertEqual(
+                        hashlib.sha256(capsule.read_bytes()).hexdigest(),
+                        payload["capsule_sha256"],
+                    )
+                    absent_line = "Absent optional state: " + ", ".join(absent_fields)
+                    self.assertEqual(capsule_text.count("Absent optional state:"), 1)
+                    self.assertIn(absent_line, capsule_text)
+                    for field in absent_fields:
+                        self.assertNotIn("TBD", capsule_text)
+                        self.assertNotIn("not recorded", capsule_text.lower())
+
+                    active_path = (
+                        repo
+                        / ".omx/state/checkpoint-and-continue/sessions"
+                        / session_scope(f"optional-{label}")
+                        / ".active-task.json"
+                    )
+                    active = json.loads(active_path.read_text(encoding="utf-8"))
+                    for field in ("completed_work", "decisions", "blockers", "validation_evidence"):
+                        self.assertIsInstance(active[field], list)
+                        if field in absent_fields:
+                            self.assertEqual(active[field], [])
+                    self.assertNotIn("next_step", active)
+                    self.assertIn("next_action", active)
+
+                    prompt = str(payload["continuation_prompt"])
+                    for value in (
+                        payload["session_id"],
+                        payload["revision"],
+                        payload["capsule_sha256"],
+                        payload["goal_identity"],
+                        payload["transfer_nonce"],
+                        payload["transfer_id"],
+                        payload["next_action"],
+                        payload["resume_validation"]["command"],
+                        payload["resume_validation"]["expected"],
+                    ):
+                        self.assertIn(str(value), prompt)
+
+    def test_critical_field_matrix_stays_fail_closed(self) -> None:
+        nonce = "abcdefghijklmnopqrstuv"
+        base: dict[str, object] = {
+            "session_id": "session-a",
+            "revision": 2,
+            "transfer_nonce": nonce,
+            "transfer_id": "r2-" + hashlib.sha256(nonce.encode()).hexdigest()[:16],
+            "goal_identity": "goal:sha256:" + ("a" * 64),
+            "objective": "Ship the handoff",
+            "active_task": "Implement structural readiness",
+            "phase": "verification",
+            "status": "in progress",
+            "completion_criteria": ["All tests pass"],
+            "completed_work": [],
+            "remaining_work": ["Implement runtime"],
+            "constraints": ["No dependencies"],
+            "decisions": [],
+            "blockers": [],
+            "authoritative_files": ["write_handoff.py::validate_structural_readiness"],
+            "validation_evidence": [],
+            "resume_validation": {
+                "command": "python3 focused_test.py",
+                "expected": "exit 0 and 7 tests pass",
+            },
+            "next_action": "Implement the exact resume contract",
+        }
+        critical = (
+            "session_id",
+            "revision",
+            "transfer_nonce",
+            "transfer_id",
+            "goal_identity",
+            "objective",
+            "active_task",
+            "phase",
+            "status",
+            "completion_criteria",
+            "remaining_work",
+            "constraints",
+            "authoritative_files",
+            "next_action",
+        )
+        self.assertTrue(validate_structural_readiness(base, session_id="session-a")["resume_ready"])
+        for field in critical:
+            with self.subTest(field=field, case="missing"):
+                state = dict(base)
+                del state[field]
+                outcome = validate_structural_readiness(state, session_id="session-a")
+                self.assertFalse(outcome["resume_ready"])
+                self.assertIn(f"missing:{field}", outcome["failures"])
+            with self.subTest(field=field, case="placeholder"):
+                state = dict(base)
+                state[field] = 0 if field == "revision" else (["TBD"] if isinstance(base[field], list) else "TBD")
+                outcome = validate_structural_readiness(state, session_id="session-a")
+                self.assertFalse(outcome["resume_ready"])
+                expected = "missing:revision" if field == "revision" else f"placeholder:{field}"
+                self.assertIn(expected, outcome["failures"])
+        for key in ("command", "expected"):
+            for case, value in (("missing", ""), ("placeholder", "TBD")):
+                with self.subTest(field=f"resume_validation.{key}", case=case):
+                    state = dict(base)
+                    state["resume_validation"] = dict(base["resume_validation"], **{key: value})
+                    outcome = validate_structural_readiness(state, session_id="session-a")
+                    self.assertFalse(outcome["resume_ready"])
+                    self.assertIn(f"{case}:resume_validation.{key}", outcome["failures"])
+
+    def test_prompt_contract_omits_optional_full_goal_prose(self) -> None:
+        prompt = build_continuation_prompt(
+            Path("/tmp/handoff.md"),
+            "OPTIONAL_FULL_GOAL_PROSE",
+            session_id="prompt-contract",
+            revision=3,
+            capsule_sha256="a" * 64,
+            goal_identity="goal:sha256:" + ("b" * 64),
+            transfer_nonce="abcdefghijklmnopqrstuv",
+            transfer_id="r3-0123456789abcdef",
+            next_action="Run the focused writer suite",
+            resume_validation_command="python3 focused_test.py",
+            resume_validation_expected="exit 0 and 7 tests pass",
+        )
+        self.assertIsInstance(prompt, str)
+        assert isinstance(prompt, str)
+        self.assertNotIn("OPTIONAL_FULL_GOAL_PROSE", prompt)
+        for value in (
+            "/tmp/handoff.md",
+            "prompt-contract",
+            "3",
+            "a" * 64,
+            "goal:sha256:" + ("b" * 64),
+            "abcdefghijklmnopqrstuv",
+            "r3-0123456789abcdef",
+            "Run the focused writer suite",
+            "python3 focused_test.py",
+            "exit 0 and 7 tests pass",
+            "verify, then acknowledge",
+            "destination sole writer after",
+            "can_continue:true",
+        ):
+            self.assertIn(value, prompt)
+
     def test_validation_evidence_round_trips_independently_from_resume_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -1858,7 +2029,7 @@ class ContextHandoffTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertIn("20260706-210530-123456-handoff.md", str(first))
 
-    def test_continuation_prompt_has_no_indent_with_goal_objective(self) -> None:
+    def test_continuation_prompt_has_no_indent_or_optional_goal_prose(self) -> None:
         prompt = build_continuation_prompt(
             Path("/tmp/handoff.md"),
             "ship the goal",
@@ -1871,12 +2042,12 @@ class ContextHandoffTests(unittest.TestCase):
         lines = prompt.splitlines()
         self.assertGreaterEqual(len(lines), 5)
         self.assertTrue(all(not line.startswith(" ") for line in lines))
-        self.assertIn("ship the goal", prompt)
-        self.assertIn("Expected session: session-123.", lines)
-        self.assertIn("Expected revision: 7.", lines)
-        self.assertIn(f"Expected capsule SHA-256: {'a' * 64}.", lines)
+        self.assertNotIn("ship the goal", prompt)
+        self.assertIn("Expected session: session-123.", prompt)
+        self.assertIn("Expected revision: 7.", prompt)
+        self.assertIn(f"Expected capsule SHA-256: {'a' * 64}.", prompt)
 
-    def test_continuation_prompt_preserves_mandatory_identity_at_exact_boundary(self) -> None:
+    def test_prompt_boundary_preserves_mandatory_identity_at_exact_size(self) -> None:
         path = Path("/tmp/complete-capsule-locator.md")
         digest = "b" * 64
         full = build_continuation_prompt(
@@ -1909,7 +2080,7 @@ class ContextHandoffTests(unittest.TestCase):
         self.assertEqual(exact, full)
         self.assertIsNone(too_small)
 
-    def test_continuation_prompt_truncates_only_multibyte_goal_prose(self) -> None:
+    def test_prompt_boundary_ignores_multibyte_optional_goal_prose(self) -> None:
         path = Path("/tmp/" + ("nested-" * 20) + "handoff.md")
         digest = "c" * 64
         mandatory = build_continuation_prompt(
@@ -1934,7 +2105,8 @@ class ContextHandoffTests(unittest.TestCase):
         self.assertIsInstance(prompt, str)
         assert isinstance(prompt, str)
         self.assertLessEqual(len(prompt.encode("utf-8")), budget)
-        self.assertIn(f"Continue from {path}.", prompt)
+        self.assertEqual(prompt, mandatory)
+        self.assertIn(str(path), prompt)
         self.assertIn("Expected session: long-session-" + ("s" * 80) + ".", prompt)
         self.assertIn("Expected revision: 11.", prompt)
         self.assertIn(f"Expected capsule SHA-256: {digest}.", prompt)

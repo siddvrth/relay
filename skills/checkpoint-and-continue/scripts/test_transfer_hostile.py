@@ -579,7 +579,9 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
         )
         self.assertIsNotNone(prompt)
         assert prompt is not None
-        self.assertLess(prompt.index("Expected goal identity"), prompt.index(injected))
+        self.assertNotIn(injected, prompt)
+        self.assertIn(self.GOAL, prompt)
+        self.assertIn(transfer_id, prompt)
         hostile_exact = dict(exact)
         hostile_exact["destination_task_id"] = "attacker-destination-task"
 
