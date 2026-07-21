@@ -58,7 +58,8 @@ It must include all of these fields with concrete values:
 
 `completed_work`, `decisions`, `blockers`, and `validation_evidence` are optional known-state arrays. They persist as empty arrays when absent, and the capsule records their absence in one compact line instead of requiring filler prose. `--validation-status` is a deprecated input alias for repeatable `--validation-evidence`; `--next-step` is a legacy input alias for canonical `--next-action`. Neither alias is written to new state.
 
-Structural guards reject missing fields, forbidden placeholders, circular next actions, cross-session identity, stale revisions, and completed/remaining overlap. They do not claim to detect semantic contradictions or generic prose.
+The low-level structural writer rejects missing fields, forbidden placeholders, circular next actions, cross-session identity, revisions that are not exact positive integers, and completed/remaining overlap.
+The orchestrator owns authoritative stale/current/new monotonicity against durable revision state while holding the per-session `.handoff.lock`. Neither layer claims to detect semantic contradictions or generic prose.
 
 If the critical kernel cannot fit, the capsule records `resume_ready:false` and a content-addressed overflow path/hash. Never switch sessions from a non-ready capsule. Optional verbose evidence normally moves to overflow without invalidating a complete kernel; if the overflow reference itself cannot fit beside that kernel, emit compact non-ready metadata with `critical:overflow_reference_budget_exceeded`.
 

@@ -782,7 +782,6 @@ def build_bounded_capsule(
 
 def build_continuation_prompt(
     out_path: Path,
-    goal_objective: str | None,
     prompt_budget_bytes: int = DEFAULT_PROMPT_BUDGET_BYTES,
     *,
     session_id: str = "",
@@ -978,7 +977,6 @@ def _main() -> int:
     if resume_ready:
         prompt = build_continuation_prompt(
             out_path,
-            args.goal_objective,
             args.prompt_budget_bytes,
             session_id=args.session_id,
             revision=args.revision,

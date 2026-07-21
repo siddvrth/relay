@@ -910,7 +910,7 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
         previous_pointer = read_json(paths.session_pointer) or {}
         last_revision = previous_revision.get("revision", 0)
         if type(last_revision) is not int or last_revision < 0:
-            last_revision = 0
+            raise RuntimeError("durable revision is invalid")
 
         delivery_recent = recently_handed_off(paths.delivery, args.dedup_seconds)
         same_state = previous_revision.get("state_sha256") == state_hash

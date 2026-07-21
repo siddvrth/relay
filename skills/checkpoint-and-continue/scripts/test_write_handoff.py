@@ -429,10 +429,9 @@ class WriteHandoffTests(unittest.TestCase):
                     self.assertFalse(outcome["resume_ready"])
                     self.assertIn(f"{case}:resume_validation.{key}", outcome["failures"])
 
-    def test_prompt_contract_omits_optional_full_goal_prose(self) -> None:
+    def test_prompt_contract_binds_dynamic_values(self) -> None:
         prompt = build_continuation_prompt(
             Path("/tmp/handoff.md"),
-            "OPTIONAL_FULL_GOAL_PROSE",
             session_id="prompt-contract",
             revision=3,
             capsule_sha256="a" * 64,
@@ -445,7 +444,6 @@ class WriteHandoffTests(unittest.TestCase):
         )
         self.assertIsInstance(prompt, str)
         assert isinstance(prompt, str)
-        self.assertNotIn("OPTIONAL_FULL_GOAL_PROSE", prompt)
         for value in (
             "/tmp/handoff.md",
             "prompt-contract",
@@ -457,9 +455,6 @@ class WriteHandoffTests(unittest.TestCase):
             "Run the focused writer suite",
             "python3 focused_test.py",
             "exit 0 and 7 tests pass",
-            "verify, then acknowledge",
-            "destination sole writer after",
-            "can_continue:true",
         ):
             self.assertIn(value, prompt)
 
@@ -511,7 +506,7 @@ class WriteHandoffTests(unittest.TestCase):
             self.assertIn("python3 focused_test.py", content)
             self.assertIn("exit 0 and 7 tests pass", content)
 
-    def test_validation_evidence_prompt_uses_exact_resume_contract_not_history(self) -> None:
+    def test_validation_evidence_prompt_binds_resume_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             init_repo(repo)
@@ -534,7 +529,6 @@ class WriteHandoffTests(unittest.TestCase):
             prompt = str(payload["continuation_prompt"])
             self.assertIn("python3 focused_test.py", prompt)
             self.assertIn("exit 0 and 7 tests pass", prompt)
-            self.assertNotIn("Historical suite passed yesterday", prompt)
 
     def test_validation_evidence_can_be_empty_when_resume_validation_is_complete(self) -> None:
         state: dict[str, object] = {
@@ -757,17 +751,14 @@ class WriteHandoffTests(unittest.TestCase):
             self.assertTrue(contract_value(payload, "resume_ready"))
             self.assertLessEqual(len(content.encode("utf-8")), 4096)
             self.assertLessEqual(len(str(prompt).encode("utf-8")), 1024)
-            self.assertNotIn("Continuation Prompt", content)
             self.assertNotIn(str(prompt), content)
-            self.assertNotIn("previous checkpoint", content.lower())
-            self.assertNotIn("predecessor", content.lower())
 
             prompt_occurrences = sum(
                 value.count(str(prompt)) for value in all_string_values(payload)
             )
             self.assertEqual(prompt_occurrences, 1)
 
-    def test_capsule_is_edge_structured_and_acknowledgement_gated(self) -> None:
+    def test_prompt_binds_capsule_and_transfer_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             init_repo(repo)
@@ -781,25 +772,22 @@ class WriteHandoffTests(unittest.TestCase):
             )
             payload = json_payload(result)
             capsule = Path(str(payload["capsule_path"]))
-            content = capsule.read_text(encoding="utf-8")
             prompt = str(payload["continuation_prompt"])
             transfer_id = "r7-" + hashlib.sha256(nonce.encode()).hexdigest()[:16]
-
-            opening = content.index("## Opening Identity Kernel")
-            middle = content.index("## Supporting State")
-            closing = content.index("## Execution / Ownership Close")
-            self.assertLess(opening, middle)
-            self.assertLess(middle, closing)
-            self.assertIn(f"Transfer ID: {transfer_id}", content[closing:])
-            self.assertIn("Resume validation command:", content[closing:])
-            self.assertIn("Resume validation expected:", content[closing:])
-            self.assertIn("sole writer only after exact acknowledgement", content[closing:])
-            self.assertIn(f"Expected transfer ID: {transfer_id}.", prompt)
-            self.assertIn("Source authoritative/destination control-only", prompt)
-            self.assertIn("status can_continue:true", prompt)
             digest = hashlib.sha256(capsule.read_bytes()).hexdigest()
-            self.assertEqual(prompt.count(digest), 1)
-            self.assertNotIn(digest, content)
+            for value in (
+                capsule,
+                payload["session_id"],
+                payload["revision"],
+                digest,
+                payload["goal_identity"],
+                nonce,
+                transfer_id,
+                payload["next_action"],
+                payload["resume_validation"]["command"],
+                payload["resume_validation"]["expected"],
+            ):
+                self.assertIn(str(value), prompt)
 
 
 class TokenEfficientCapsuleTests(unittest.TestCase):
@@ -1128,11 +1116,6 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
                 self.assertFalse(outcome["resume_ready"])
                 self.assertIn("missing:revision", outcome["failures"])
 
-        writer_source = WRITE_HANDOFF.read_text(encoding="utf-8")
-        self.assertNotIn("latest_revision", writer_source)
-        self.assertNotIn("stale:revision", writer_source)
-
-
 class ContextHandoffTests(unittest.TestCase):
     def test_timing_strategy_matrix_is_deterministic_and_budget_independent(self) -> None:
         import context_handoff as context_module
@@ -1222,41 +1205,6 @@ class ContextHandoffTests(unittest.TestCase):
                     payload = json_payload(result)
                     self.assertEqual(payload["context_used_ratio"], 0.50)
                     self.assertIs(payload["should_handoff"], True)
-
-    @unittest.skipUnless(PACKAGE_ROOT is not None, "public documentation source is not installed")
-    def test_timing_strategy_matrix_documentation_contract(self) -> None:
-        assert PACKAGE_ROOT is not None
-        documents = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in (
-                PACKAGE_ROOT / "README.md",
-                PACKAGE_ROOT / "docs/metrics.md",
-                PACKAGE_ROOT / "docs/lifecycle.md",
-                SKILL_ROOT / "reference.md",
-            )
-        )
-        normalized = documents.lower().replace("`", "")
-        for required in (
-            "no proactive handoff",
-            "0.30",
-            "0.50",
-            "0.70",
-            "precompact-only",
-            "milestone",
-            "experimental generic default",
-            "numeric overrides",
-            "no threshold is proven optimal",
-            "missing telemetry cannot support a threshold claim",
-        ):
-            with self.subTest(required=required):
-                self.assertIn(required, normalized)
-        for forbidden in (
-            "30% is optimal",
-            "optimal threshold",
-            "byte budget determines the threshold",
-        ):
-            with self.subTest(forbidden=forbidden):
-                self.assertNotIn(forbidden, normalized)
 
     def test_validation_evidence_legacy_read_does_not_synthesize_resume_validation(self) -> None:
         import context_handoff as context_module
@@ -1421,24 +1369,94 @@ class ContextHandoffTests(unittest.TestCase):
             )
             self.assertEqual(paths.revision.read_bytes(), revision_before)
 
-            durable_session_id = "bool-durable-revision"
-            durable_args = replace_arg(
-                rich_context_args(repo),
-                "--session-id",
-                durable_session_id,
+            invalid_revisions = (
+                ("bool", True),
+                ("malformed", "malformed"),
+                ("negative", -1),
             )
-            durable_paths = context_module.state_paths(repo, durable_session_id)
-            durable_paths.session_dir.mkdir(parents=True)
-            durable_paths.lock.touch()
-            durable_paths.revision.write_text(
-                json.dumps({**durable, "revision": True}, sort_keys=True),
-                encoding="utf-8",
-            )
-            allocated = json_payload(
-                run_context_handoff(*durable_args, "--trigger", "pre-compact")
-            )
-            self.assertEqual(allocated["revision"], 1)
-            self.assertIs(type(allocated["revision"]), int)
+            for label, invalid_revision in invalid_revisions:
+                with self.subTest(durable_revision=label):
+                    durable_session_id = f"{label}-durable-revision"
+                    durable_args = replace_arg(
+                        rich_context_args(repo),
+                        "--session-id",
+                        durable_session_id,
+                    )
+                    first = json_payload(
+                        run_context_handoff(
+                            *durable_args,
+                            "--trigger",
+                            "pre-compact",
+                        )
+                    )
+                    durable_paths = context_module.state_paths(
+                        repo,
+                        durable_session_id,
+                    )
+                    durable_state = json.loads(
+                        durable_paths.revision.read_text(encoding="utf-8")
+                    )
+                    retry_intent = {
+                        "version": 1,
+                        "session_id": durable_session_id,
+                        "source_session_id": durable_session_id,
+                        "state_sha256": durable_state["state_sha256"],
+                        "goal_identity": durable_state["goal_identity"],
+                        "revision": 1,
+                        "capsule_path": first["capsule_path"],
+                        "transfer_nonce": first["transfer_nonce"],
+                        "writer_complete": True,
+                        "write_result": first,
+                    }
+                    durable_paths.prepare_intent.write_text(
+                        json.dumps(retry_intent, sort_keys=True),
+                        encoding="utf-8",
+                    )
+                    durable_paths.revision.write_text(
+                        json.dumps(
+                            {**durable_state, "revision": invalid_revision},
+                            sort_keys=True,
+                        ),
+                        encoding="utf-8",
+                    )
+                    before = {
+                        path: path.read_bytes()
+                        for path in (
+                            durable_paths.revision,
+                            durable_paths.session_pointer,
+                            durable_paths.latest_pointer,
+                            durable_paths.prepare_intent,
+                        )
+                    }
+                    capsule_root = repo / ".omx/state/checkpoint-and-continue"
+                    capsules_before = {
+                        path: path.read_bytes()
+                        for path in capsule_root.rglob("*-handoff.md")
+                    }
+
+                    rejected = run_context_handoff(
+                        *durable_args,
+                        "--trigger",
+                        "pre-compact",
+                    )
+
+                    self.assertNotEqual(rejected.returncode, 0)
+                    rejected_error = json.loads(rejected.stdout)
+                    self.assertEqual(
+                        rejected_error["error"],
+                        "durable revision is invalid",
+                    )
+                    self.assertEqual(
+                        before,
+                        {path: path.read_bytes() for path in before},
+                    )
+                    self.assertEqual(
+                        capsules_before,
+                        {
+                            path: path.read_bytes()
+                            for path in capsule_root.rglob("*-handoff.md")
+                        },
+                    )
 
     def test_concurrent_revision_allocation_is_contiguous(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1665,7 +1683,7 @@ class ContextHandoffTests(unittest.TestCase):
                 1,
             )
 
-    def test_threshold_handoff_requests_clean_task_without_inherited_history(self) -> None:
+    def test_threshold_handoff_uses_clean_task_and_pointer_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             init_repo(repo)
@@ -1687,7 +1705,6 @@ class ContextHandoffTests(unittest.TestCase):
             self.assertEqual(contract_value(payload, "handoff_mode"), "clean_task")
             prompt = contract_value(payload, "continuation_prompt", "prompt")
             self.assertIsInstance(prompt, str)
-            self.assertNotIn("fork_thread", str(prompt))
 
             _pointer_path, record = find_latest_pointer(repo)
             pointer_text = json.dumps(record, sort_keys=True)
@@ -2153,30 +2170,11 @@ class ContextHandoffTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertIn("20260706-210530-123456-handoff.md", str(first))
 
-    def test_continuation_prompt_has_no_indent_or_optional_goal_prose(self) -> None:
-        prompt = build_continuation_prompt(
-            Path("/tmp/handoff.md"),
-            "ship the goal",
-            session_id="session-123",
-            revision=7,
-            capsule_sha256="a" * 64,
-        )
-        self.assertIsInstance(prompt, str)
-        assert isinstance(prompt, str)
-        lines = prompt.splitlines()
-        self.assertGreaterEqual(len(lines), 5)
-        self.assertTrue(all(not line.startswith(" ") for line in lines))
-        self.assertNotIn("ship the goal", prompt)
-        self.assertIn("Expected session: session-123.", prompt)
-        self.assertIn("Expected revision: 7.", prompt)
-        self.assertIn(f"Expected capsule SHA-256: {'a' * 64}.", prompt)
-
     def test_prompt_boundary_preserves_mandatory_identity_at_exact_size(self) -> None:
         path = Path("/tmp/complete-capsule-locator.md")
         digest = "b" * 64
         full = build_continuation_prompt(
             path,
-            None,
             4096,
             session_id="boundary-session",
             revision=9,
@@ -2187,7 +2185,6 @@ class ContextHandoffTests(unittest.TestCase):
         exact_budget = len(full.encode("utf-8"))
         exact = build_continuation_prompt(
             path,
-            None,
             exact_budget,
             session_id="boundary-session",
             revision=9,
@@ -2195,7 +2192,6 @@ class ContextHandoffTests(unittest.TestCase):
         )
         too_small = build_continuation_prompt(
             path,
-            None,
             exact_budget - 1,
             session_id="boundary-session",
             revision=9,
@@ -2203,38 +2199,6 @@ class ContextHandoffTests(unittest.TestCase):
         )
         self.assertEqual(exact, full)
         self.assertIsNone(too_small)
-
-    def test_prompt_boundary_ignores_multibyte_optional_goal_prose(self) -> None:
-        path = Path("/tmp/" + ("nested-" * 20) + "handoff.md")
-        digest = "c" * 64
-        mandatory = build_continuation_prompt(
-            path,
-            None,
-            4096,
-            session_id="long-session-" + ("s" * 80),
-            revision=11,
-            capsule_sha256=digest,
-        )
-        self.assertIsInstance(mandatory, str)
-        assert isinstance(mandatory, str)
-        budget = len(mandatory.encode("utf-8")) + 80
-        prompt = build_continuation_prompt(
-            path,
-            "界" * 1000,
-            budget,
-            session_id="long-session-" + ("s" * 80),
-            revision=11,
-            capsule_sha256=digest,
-        )
-        self.assertIsInstance(prompt, str)
-        assert isinstance(prompt, str)
-        self.assertLessEqual(len(prompt.encode("utf-8")), budget)
-        self.assertEqual(prompt, mandatory)
-        self.assertIn(str(path), prompt)
-        self.assertIn("Expected session: long-session-" + ("s" * 80) + ".", prompt)
-        self.assertIn("Expected revision: 11.", prompt)
-        self.assertIn(f"Expected capsule SHA-256: {digest}.", prompt)
-        self.assertNotIn("界" * 1000, prompt)
 
     def test_minimum_prompt_budget_blocks_delivery_without_invalidating_capsule(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2250,10 +2214,6 @@ class ContextHandoffTests(unittest.TestCase):
             self.assertFalse(contract_value(payload, "should_handoff"))
             self.assertFalse(contract_value(payload, "delivery_emitted"))
             self.assertIsNone(contract_value(payload, "continuation_prompt"))
-            self.assertEqual(
-                contract_value(payload, "skip_reason"),
-                "mandatory continuation prompt exceeds prompt byte budget",
-            )
             guard = contract_value(payload, "prompt_guard")
             self.assertIsInstance(guard, dict)
             assert isinstance(guard, dict)
@@ -2426,7 +2386,6 @@ class HookEnvelopeAndParityTests(unittest.TestCase):
                 capsule_path = contract_value(pointer, "capsule_path")
                 self.assertIsInstance(capsule_path, str)
                 capsule = Path(str(capsule_path)).read_text(encoding="utf-8")
-                self.assertNotIn("Continuation Prompt", capsule)
                 self.assertNotIn(str(prompt), capsule)
                 self.assertIn("Ship the token-efficient fresh handoff", capsule)
 

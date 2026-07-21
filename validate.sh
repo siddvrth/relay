@@ -134,25 +134,62 @@ threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"a","context_usage_percen
 compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"b","context_usage_percent":1}' | bash scripts/workflow/checkpoint_and_continue_hook.sh PreCompact 2>/dev/null)"
 capsule_count="$(find "$SMOKE_REPO/.omx/state/checkpoint-and-continue" -name '*-handoff.md' -type f | wc -l | tr -d '[:space:]')"
 
-[[ "$threshold" == *'"hookEventName": "UserPromptSubmit"'* ]]
-[[ "$threshold" == *'"additionalContext"'* ]]
-[[ "$threshold" == *'Exact next action: inspect the official hook response.'* ]]
-[[ "$threshold" == *'Resume validation expected: exit 0.'* ]]
-[[ "$threshold" != *'fresh-install smoke objective'* ]]
-[[ "$compact" == *'"continue": true'* ]]
-[[ "$compact" != *'hookSpecificOutput'* ]]
-[[ "$capsule_count" == "2" ]]
-echo "fresh-install Codex hook lifecycle: OK"
-
 plugin_threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-a","context_usage_percent":31}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/checkpoint_and_continue_hook.sh" UserPromptSubmit 2>/dev/null)"
 plugin_compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-b","context_usage_percent":1}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/checkpoint_and_continue_hook.sh" PreCompact 2>/dev/null)"
-[[ "$plugin_threshold" == *'"hookEventName": "UserPromptSubmit"'* ]]
-[[ "$plugin_threshold" == *'"additionalContext"'* ]]
-[[ "$plugin_threshold" == *'Exact next action: inspect the official hook response.'* ]]
-[[ "$plugin_threshold" == *'Resume validation expected: exit 0.'* ]]
-[[ "$plugin_threshold" != *'fresh-install smoke objective'* ]]
-[[ "$plugin_compact" == *'"continue": true'* ]]
-[[ "$plugin_compact" != *'hookSpecificOutput'* ]]
-echo "plugin-bundled hook lifecycle: OK"
+
+python3 - "$SMOKE_REPO" "$threshold" "$compact" "$plugin_threshold" "$plugin_compact" "$capsule_count" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+thresholds = (("a", json.loads(sys.argv[2])), ("plugin-a", json.loads(sys.argv[4])))
+compacts = (json.loads(sys.argv[3]), json.loads(sys.argv[5]))
+official_keys = {
+    "continue",
+    "stopReason",
+    "suppressOutput",
+    "systemMessage",
+    "hookSpecificOutput",
+}
+states = {}
+for path in (repo / ".omx/state/checkpoint-and-continue/sessions").glob("*/.active-task.json"):
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    states[payload["session_id"]] = payload
+
+for session_id, payload in thresholds:
+    assert set(payload) <= official_keys
+    specific = payload["hookSpecificOutput"]
+    assert specific["hookEventName"] == "UserPromptSubmit"
+    prompt = specific["additionalContext"]
+    pointer = next(
+        candidate
+        for path in (repo / ".omx/state/checkpoint-and-continue/sessions").glob("*/.pointer.json")
+        if (candidate := json.loads(path.read_text(encoding="utf-8")))["session_id"] == session_id
+    )
+    state = states[session_id]
+    dynamic_values = (
+        pointer["capsule_path"],
+        pointer["session_id"],
+        pointer["revision"],
+        pointer["capsule_sha256"],
+        pointer["goal_identity"],
+        pointer["transfer_nonce"],
+        pointer["transfer_id"],
+        state["next_action"],
+        state["resume_validation"]["command"],
+        state["resume_validation"]["expected"],
+    )
+    assert all(str(value) in prompt for value in dynamic_values)
+    assert len(prompt.encode("utf-8")) <= pointer["metrics"]["prompt_budget_bytes"]
+
+for payload in compacts:
+    assert set(payload) <= official_keys
+    assert payload["continue"] is True
+    assert "hookSpecificOutput" not in payload
+
+assert sys.argv[6] == "2"
+PY
+echo "fresh-install Codex and plugin hook lifecycles: OK"
 
 echo "=== all checks passed ==="

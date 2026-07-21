@@ -32,7 +32,8 @@ Timing evaluation uses six separate non-claim conditions: no proactive handoff, 
 
 Each ready capsule resumes independently. The capsule contains no continuation prompt. A metadata-only pointer records the capsule path/hash, source/transfer/goal/revision/nonce identity, delivery state, and metrics; it does not copy capsule or prompt text.
 
-Structural guards reject missing or placeholder fields, circular next actions, session mismatch, stale revisions, and completed/remaining overlap. If critical data cannot fit, Fresh Handoff writes safe `resume_ready:false` metadata and a content-addressed overflow reference. Optional verbose evidence normally moves to content-addressed overflow while the capsule stays ready; if even that reference cannot fit beside the kernel, Fresh Handoff emits compact non-ready metadata instead.
+The low-level structural writer rejects missing or placeholder fields, circular next actions, session mismatch, revisions that are not exact positive integers, and completed/remaining overlap.
+The orchestrator owns authoritative stale/current/new monotonicity against durable revision state while holding the per-session `.handoff.lock`. If critical data cannot fit, Fresh Handoff writes safe `resume_ready:false` metadata and a content-addressed overflow reference. Optional verbose evidence normally moves to content-addressed overflow while the capsule stays ready; if even that reference cannot fit beside the kernel, Fresh Handoff emits compact non-ready metadata instead.
 
 The mandatory prompt contains the exact capsule path, session, revision, SHA-256, `next_action`, both exact `resume_validation` fields, and transfer ownership instructions. It deliberately omits full goal prose. If those mandatory lines do not fit the configured prompt budget, the capsule can remain `resume_ready:true`, but `prompt_guard.fits` is false and delivery is blocked.
 

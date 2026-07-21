@@ -34,11 +34,12 @@ The structural guard rejects:
 
 - missing or placeholder critical values
 - a session mismatch
-- a stale revision
+- a revision that is not an exact positive integer
 - a next action that circularly asks to find or create the next action through another checkpoint
 - overlap between completed and remaining work
 
-This is deliberately structural. It does not classify semantic contradiction, factual accuracy, or boilerplate quality.
+The low-level writer's revision check is deliberately structural.
+The orchestrator owns authoritative stale/current/new monotonicity against durable revision state while holding the per-session `.handoff.lock`. Neither layer classifies semantic contradiction, factual accuracy, or boilerplate quality.
 
 If the critical kernel exceeds the capsule budget, the emitted capsule contains safe metadata, `resume_ready:false`, and the content-addressed overflow path/SHA-256. No continuation prompt is emitted. Optional evidence normally moves to content-addressed overflow while a complete kernel remains ready. If the reference cannot fit beside the complete kernel, the runtime emits compact non-ready metadata and records `critical:overflow_reference_budget_exceeded`.
 
