@@ -1223,13 +1223,15 @@ class ContextHandoffTests(unittest.TestCase):
                     self.assertEqual(payload["context_used_ratio"], 0.50)
                     self.assertIs(payload["should_handoff"], True)
 
+    @unittest.skipUnless(PACKAGE_ROOT is not None, "public documentation source is not installed")
     def test_timing_strategy_matrix_documentation_contract(self) -> None:
+        assert PACKAGE_ROOT is not None
         documents = "\n".join(
             path.read_text(encoding="utf-8")
             for path in (
-                REPO / "README.md",
-                REPO / "docs/metrics.md",
-                REPO / "docs/lifecycle.md",
+                PACKAGE_ROOT / "README.md",
+                PACKAGE_ROOT / "docs/metrics.md",
+                PACKAGE_ROOT / "docs/lifecycle.md",
                 SKILL_ROOT / "reference.md",
             )
         )

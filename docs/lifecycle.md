@@ -10,10 +10,12 @@ The session's active state must contain concrete values for:
 
 - identity: `session_id`, `revision`
 - intent: objective, active task, phase, status, completion criteria
-- progress: completed work and remaining work
-- safety: constraints/non-goals, decisions, blockers/risks
-- evidence: authoritative files/symbols and validation
-- execution: one exact next action
+- progress: remaining work
+- safety: constraints/non-goals
+- evidence: authoritative files/symbols
+- execution: one exact `next_action` and exact `resume_validation.command`/`.expected`
+
+`completed_work`, `decisions`, `blockers`, and historical `validation_evidence` are optional known-state arrays. Omit their CLI flags when there is no fact to record; canonical state persists `[]` and the capsule emits one compact absence line. Legacy `validation`/`--validation-status` and `next_step`/`--next-step` are input compatibility only and never replace exact resume validation.
 
 This state is stored under the hashed session directory, not in a repo-global active-task file.
 
@@ -49,6 +51,7 @@ Launch exactly one clean task only when the internal result reports all of the f
 - exact `capsule_path` and `capsule_sha256`
 - exact `session_id` and `revision`
 - exact `transfer_id`, `goal_identity`, and one-use nonce
+- canonical `next_action` and exact `resume_validation.command`/`.expected`
 - `prompt_guard.fits:true`
 - `delivery_emitted:true` with one continuation prompt
 
@@ -66,7 +69,7 @@ The clean task must:
 4. Inspect live git state, diffs, and authoritative files/symbols.
 5. Treat the repository and current goal state as authoritative.
 6. Continue or recreate the recorded goal objective only when needed; never replace an unrelated active goal.
-7. Run the recorded smallest validation, then call the canonical `verify` transition with every exact identity field.
+7. Run the recorded `resume_validation.command`, confirm its exact expected observable, then call the canonical `verify` transition with every exact identity, `next_action`, and `resume_validation` field.
 8. Explicitly acknowledge. This atomically revokes source writes and commits destination ownership; an exact retry is idempotent, while stale/replay/cross-session variants fail.
 9. Request and record only an actually supported stop capability. Visible archive/closure is separate. If no trustworthy stop is available, preserve source read-only state plus `termination_pending`.
 10. Wait for `status.can_continue:true`, then execute the exact next action and refresh state with the result.
@@ -81,7 +84,7 @@ session B -> newer ready revision and one delivery -> session C
 session C -> complete, or repeat
 ```
 
-At every boundary, the new task needs one self-contained capsule and one bounded prompt—not the old transcript, a prior capsule chain, or prompt text duplicated in pointers. Goal accounting can span multiple clean tasks even though authority and runtime state remain session-scoped.
+At every boundary, the new task needs one self-contained capsule and one bounded prompt—not the old transcript, a prior capsule chain, or prompt text duplicated in pointers. The prompt carries goal identity but omits full goal prose; the capsule and live goal inspection remain authoritative. Goal accounting can span multiple clean tasks even though authority and runtime state remain session-scoped.
 
 ## Stop Conditions
 

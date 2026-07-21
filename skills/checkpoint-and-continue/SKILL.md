@@ -15,7 +15,7 @@ Defaults are independent:
 - transported continuation prompt: at most 1024 UTF-8 bytes
 - automatic threshold policy: `0.30` used context when the host supplies compatible telemetry
 
-Byte limits are deterministic hard ceilings. The flags may select smaller limits for testing or stricter local policy, but values above 4096/1024 are rejected before capsule, pointer, or delivery state is written; hooks fail open without injecting a continuation prompt. Token estimates are approximate telemetry and never a readiness or release gate.
+Byte limits are deterministic hard ceilings. The flags may select smaller limits for testing or stricter local policy, but values above 4096/1024 are rejected before capsule, pointer, or delivery state is written; hooks fail open without injecting a continuation prompt. Byte counts and `(bytes+3)//4` proxies are storage/transport diagnostics; not evidence of token or cost savings.
 
 ## Boundaries
 
@@ -43,19 +43,20 @@ The `0.30` threshold is experimental and host-dependent. Official Codex `UserPro
 A ready capsule is edge-structured so critical facts occur at both attention boundaries:
 
 - opening identity kernel: objective, phase/status, next unfinished action, completion/stop condition, and critical constraints
-- compact supporting middle: progress, decisions, blockers, authoritative files, and validation
-- closing execution/ownership block: action now, smallest validation, source/transfer/goal/revision/nonce identity, authoritative transport-SHA comparison, and the acknowledgement ownership rule
+- compact supporting middle: required remaining work and authoritative files plus any known completed work, decisions, blockers, and historical `validation_evidence`
+- closing execution/ownership block: `next_action`, exact `resume_validation.command` and `.expected`, source/transfer/goal/revision/nonce identity, authoritative transport-SHA comparison, and the acknowledgement ownership rule
 
 It must include all of these fields with concrete values:
 
 - `session_id` and monotonically increasing `revision`
 - objective, active task, phase, and status
 - completion criteria
-- completed and remaining work
-- constraints/non-goals, decisions, and blockers/risks
+- remaining work and constraints/non-goals
 - authoritative files or symbols
-- validation evidence
-- one exact next action
+- one exact `next_action`
+- exact `resume_validation.command` and `resume_validation.expected`
+
+`completed_work`, `decisions`, `blockers`, and `validation_evidence` are optional known-state arrays. They persist as empty arrays when absent, and the capsule records their absence in one compact line instead of requiring filler prose. `--validation-status` is a deprecated input alias for repeatable `--validation-evidence`; `--next-step` is a legacy input alias for canonical `--next-action`. Neither alias is written to new state.
 
 Structural guards reject missing fields, forbidden placeholders, circular next actions, cross-session identity, stale revisions, and completed/remaining overlap. They do not claim to detect semantic contradictions or generic prose.
 
@@ -77,20 +78,18 @@ Capsule readiness and transport readiness are independent. The mandatory prompt 
      --phase "implementation" \
      --status "Runtime complete; validation pending" \
      --completion-criteria "Targeted and full validation pass" \
-     --completed-work "Implemented the runtime change" \
      --remaining-work "Run validation and resolve failures" \
      --constraints "Do not add dependencies" \
-     --decisions "Use the existing standard-library implementation" \
-     --blockers "No known external blocker" \
      --authoritative-files "src/example.py" \
-     --validation-status "Validation has not run after the change" \
+     --resume-validation-command "python3 tests/test_example.py" \
+     --resume-validation-expected "exit 0 and all selected tests pass" \
      --next-action "Run the targeted test and fix the first failure"
    ```
 
 2. Refresh through `context_handoff.py` or a configured hook. Revision creation and prompt delivery are separate: every `PreCompact` advances the revision, while the recent-delivery cooldown suppresses duplicate transport.
 3. Continue only when the result has `resume_ready:true`, `prompt_guard.fits:true`, and an emitted prompt containing the exact capsule path, SHA-256, session, and revision.
 4. If Codex App thread tools are available and continuous execution is authorized, record launch intent, then create exactly one clean local project task with the single emitted continuation prompt as its initial prompt.
-5. The destination verifies the exact transfer ID, source, goal identity, revision, capsule SHA-256, nonce, live repo/goal state, next action, and smallest validation, then explicitly acknowledges.
+5. The destination verifies the exact transfer ID, source, goal identity, revision, capsule SHA-256, nonce, live repo/goal state, `next_action`, and both exact `resume_validation` fields, then explicitly acknowledges.
 6. Exact acknowledgement atomically revokes source write authority and makes the destination owner. The destination remains control-only until status reports either observed source quiescence or durable read-only `termination_pending` and `can_continue:true`.
 7. Only after acknowledgement request an actually supported stop capability. Visible archive/closure is separate evidence and never proves quiescence.
 
@@ -106,7 +105,7 @@ The mandatory transported prompt identifies one capsule by exact path, session, 
 4. Inspect `git status --short`, current diffs, and each authoritative file or symbol.
 5. Treat live repository and goal state as authoritative.
 6. Continue the recorded goal objective only when needed; never replace an unrelated active goal.
-7. Run the recorded smallest validation and use `transfer_control.py verify` with the exact identity.
+7. Run the recorded `resume_validation.command`, confirm its exact expected observable, and use `transfer_control.py verify` with the bound `next_action` and `resume_validation` values.
 8. Acknowledge exactly once, request/record supported source stop behavior, and wait for `can_continue:true` before substantial implementation.
 9. Execute the capsule's exact next action, then refresh the session revision.
 
@@ -131,7 +130,7 @@ The repo-latest pointer cannot authorize cross-session resume. Pointers contain 
 
 ## Goal Mode
 
-Pass `--goal-objective` with the exact goal text. The runtime includes it as optional capsule evidence and in the continuation prompt when it fits the 1024-byte prompt budget; inspect truncation/overflow telemetry rather than claiming an over-budget goal was preserved inline. A fresh task inspects current goal state first and recreates or continues the objective only when necessary.
+Pass `--goal-objective` with the exact goal text when goal-mode evidence belongs in the capsule. The continuation prompt deliberately omits full goal prose; it carries `goal_identity` and directs the fresh task to inspect live goal state plus the exact capsule. A fresh task recreates or continues the objective only when necessary.
 
 Goal-period `tokensUsed` is narrower than total context, billing usage, cached input, or full transcript consumption. V2 evidence requires at least 20 unique tasks, one per pair; four distinct safe repo-relative preregistration artifacts and hashes; offset-aware run starts after the freeze and within the validator's future-skew bound; every candidate outcome passed and ready; quality non-inferiority; positive median savings; and the exact sign-test gate. Release validation resolves real control-to-candidate-to-HEAD ancestry, matches the declared repository to `origin`, verifies a framed digest of the frozen shipped runtime contract at both commits and the current tree, and verifies each preregistration artifact as the same tracked regular blob at candidate, HEAD, and current. Evidence may live in a later evidence-only commit when runtime has not drifted. Until every gate passes, preserve the exact `.codex-plugin/release-policy.json` `experimental_non_claim` contract.
 

@@ -25,16 +25,16 @@ Timing evaluation uses six separate non-claim conditions: no proactive handoff, 
 ## What A Ready Capsule Preserves
 
 - objective, active task, phase, status, and completion criteria
-- completed and remaining work
-- constraints/non-goals, decisions, blockers, and one exact next action
-- authoritative files or symbols and validation evidence
+- remaining work, constraints/non-goals, and one exact `next_action`
+- authoritative files or symbols plus exact `resume_validation.command` and `.expected`
+- optional known-state arrays for completed work, decisions, blockers, and historical `validation_evidence` (empty without filler when absent)
 - source/transfer/goal identity, revision, nonce, and the authoritative transport-SHA comparison rule
 
 Each ready capsule resumes independently. The capsule contains no continuation prompt. A metadata-only pointer records the capsule path/hash, source/transfer/goal/revision/nonce identity, delivery state, and metrics; it does not copy capsule or prompt text.
 
 Structural guards reject missing or placeholder fields, circular next actions, session mismatch, stale revisions, and completed/remaining overlap. If critical data cannot fit, Fresh Handoff writes safe `resume_ready:false` metadata and a content-addressed overflow reference. Optional verbose evidence normally moves to content-addressed overflow while the capsule stays ready; if even that reference cannot fit beside the kernel, Fresh Handoff emits compact non-ready metadata instead.
 
-The mandatory prompt contains the exact capsule path, session, revision, and SHA-256. If those mandatory lines do not fit the configured prompt budget, the capsule can remain `resume_ready:true`, but `prompt_guard.fits` is false and delivery is blocked.
+The mandatory prompt contains the exact capsule path, session, revision, SHA-256, `next_action`, both exact `resume_validation` fields, and transfer ownership instructions. It deliberately omits full goal prose. If those mandatory lines do not fit the configured prompt budget, the capsule can remain `resume_ready:true`, but `prompt_guard.fits` is false and delivery is blocked.
 
 ## Revision And Delivery
 
@@ -89,7 +89,7 @@ bash validate.sh
 
 The release process also installs into a temporary git repository, audits and repairs the install, reruns the audit, runs the completion gate, and records a live `/hooks` load/trust check. `scripts/check_release_readiness.py` separately requires a clean committed release checkout.
 
-Static byte/fidelity checks and token-efficiency evidence are separate. A historical 20-pair pre-v2 clean-versus-fork study showed context isolation but did not show lower goal-token use or cost. It is retained as negative baseline evidence, not proof about v2.
+Static byte/fidelity checks and token-efficiency evidence are separate. Capsule bytes, prompt bytes, and `(bytes+3)//4` proxies are storage/transport diagnostics; not evidence of token or cost savings. A historical 20-pair pre-v2 clean-versus-fork study showed context isolation but did not show lower goal-token use or cost. It is retained as negative baseline evidence, not proof about v2.
 
 Do not claim token or cost improvement until a preregistered v2 study has at least 20 paired runs with one unique task ID per pair, every candidate passed and ready, task-level output-quality non-inferiority, positive median goal-token savings, and the exact sign-test result. Release validation also binds four distinct preregistration paths and hashes, post-freeze run timestamps, repository origin, real control-to-candidate-to-release ancestry, and a deterministic digest of the frozen shipped runtime contract with no candidate-to-release drift. Evidence may be committed after the candidate when that later commit changes evidence only. The public release remains governed by the exact four-field `.codex-plugin/release-policy.json` `experimental_non_claim` contract.
 

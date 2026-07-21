@@ -5,16 +5,16 @@
 | Requirement | Required behavior | Evidence |
 | --- | --- | --- |
 | Independent defaults | Trigger ratio remains `0.30`, capsule remains 4096 UTF-8 bytes, and prompt remains 1024 UTF-8 bytes; changing one does not change another | Boundary/default tests |
-| Self-contained resume | Every ready revision preserves every critical kernel field and resumes without a predecessor | Kernel retention and predecessor-deletion tests |
+| Self-contained resume | Every ready revision preserves every critical kernel field, including canonical `next_action` and exact `resume_validation.command`/`.expected`, and resumes without a predecessor | Kernel retention and predecessor-deletion tests |
 | Fail closed on critical overflow | Capsule contains safe metadata, verified overflow path/hash, and `resume_ready:false`; no prompt or autonomous switch occurs | Critical-overflow tests |
 | Bound optional evidence | Optional content-addressed overflow preserves a complete ready kernel when its reference fits; dense reference failure emits compact `resume_ready:false` metadata | Deterministic pruning and overflow-reference tests |
-| Mandatory prompt identity | Prompt contains exact path/SHA/source/transfer/goal/revision/nonce identity plus smallest validation and acknowledgement rule; if that block exceeds budget, capsule may remain ready but delivery is blocked | Exact-boundary and minimum-budget tests |
+| Mandatory prompt identity | Prompt contains exact path/SHA/source/transfer/goal/revision/nonce identity plus `next_action`, both exact `resume_validation` values, and acknowledgement/ownership rules; full goal prose is omitted; if that block exceeds budget, capsule may remain ready but delivery is blocked | Exact-boundary and minimum-budget tests |
 | One prompt copy | Transported prompt is at most 1024 bytes and appears once; capsule and pointers contain no prompt text | Separation and duplicate-marker tests |
-| Structural readiness only | Missing fields, placeholders, circular next action, session mismatch, stale revision, and completed/remaining overlap fail deterministically | Guard fixture tests |
+| Structural readiness only | Missing critical fields, placeholders, circular next action, session mismatch, stale revision, and completed/remaining overlap fail deterministically; optional `completed_work`, `decisions`, `blockers`, and `validation_evidence` may be known-empty arrays | Guard fixture tests |
 | Session isolation | Active state, revision, lock, session pointer, and delivery ledger cannot collide across sessions | Cross-session and concurrency tests |
 | Fresh revision, deduped delivery | Every `PreCompact`, including unchanged state, advances revision while transport remains limited to one delivery per session cooldown | `PreCompact`/dedup integration tests |
 | Safe pointer reuse | Session/scope/revision/readiness, contained path/file, and SHA-256 validate before reuse; failure forces a revision | Corrupt/forged pointer tests |
-| Edge-structured identity | Opening preserves intent/constraints; closing preserves action, smallest validation, exact transfer/goal/revision/nonce identity, authoritative SHA comparison, and acknowledgement rule | Opening/middle/closing position tests |
+| Edge-structured identity | Opening and closing deliberately repeat `next_action` and both exact `resume_validation` values; closing also preserves transfer/goal/revision/nonce identity, authoritative SHA comparison, and acknowledgement rule | Opening/middle/closing position tests |
 | Replay-safe ownership | Exact acknowledgement retry is idempotent; stale, cross-session, replayed, or mismatched acknowledgement cannot mutate ownership or stop state | Transfer-control hostile tests |
 | Single writer | Source remains authoritative before acknowledgement; acknowledgement commits destination ownership before stop; destination writes wait for quiescence/read-only `termination_pending` | Ownership/guard integration tests |
 
@@ -41,10 +41,11 @@ The threshold remains experimental because current [Codex hook documentation](ht
 | Canonical wins | Newer canonical state is never replaced by legacy state | Ordering tests |
 | One locked publish transaction | Canonical skill/hook swap, verified migration publication, and legacy-skill archival either all commit or all restore their prior live surfaces | Combined fault-injection/retry tests |
 | Deactivate unbounded legacy writer | `.agents/skills/session-continuity` is archived outside the active namespace; installed calls use the canonical 4096/1024-bounded writer; audit fails while legacy remains active | Installed-path budget and temporary lifecycle tests |
+| Canonical fresh-install seed | Installed writer accepts a ready seed with optional arrays absent, persists them as `[]`, writes only `next_action`, binds exact `resume_validation`, and delivers through both installed adapters | Fresh-install CLI and hook smoke |
 
 ## Clean-Task Resume
 
-A production clean task is eligible only when the result reports `resume_ready:true`, `prompt_guard.fits:true`, exact capsule path/SHA-256/source/transfer/goal/revision/nonce identity, and `delivery_emitted:true`. Delivery alone never transfers authority. The destination must verify and explicitly acknowledge; it becomes sole owner at acknowledgement but remains control-only until `status.can_continue:true` proves source quiescence or durable read-only `termination_pending`.
+A production clean task is eligible only when the result reports `resume_ready:true`, `prompt_guard.fits:true`, exact capsule path/SHA-256/source/transfer/goal/revision/nonce identity, canonical `next_action`, exact `resume_validation.command`/`.expected`, and `delivery_emitted:true`. Delivery alone never transfers authority. The destination must verify the bound action/validation values and explicitly acknowledge; it becomes sole owner at acknowledgement but remains control-only until `status.can_continue:true` proves source quiescence or durable read-only `termination_pending`.
 
 `fork_thread` is not a production handoff because it inherits completed conversation history. If thread tools are absent, the package returns exact continuation data without claiming task creation.
 

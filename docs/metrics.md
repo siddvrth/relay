@@ -25,7 +25,9 @@ Static checks cover:
 8. source/installed parity, bounded installed writer, and transactional legacy migration
 9. temporary install, audit, repair, re-audit, and completion gate
 
-Approximate token proxies may appear in runtime metrics, but they do not gate readiness or release. Capsule and prompt bytes are storage/transport measurements, not goal-token savings.
+Capsule bytes, prompt bytes, fixed duplicated-semantic marker counts, and `(bytes+3)//4` proxies may appear in deterministic reports. They are storage/transport diagnostics; not evidence of token or cost savings. They do not gate readiness or release.
+
+A density comparison holds semantic values, revision, nonce/session lengths, byte budgets, and equal-length worktree paths constant across beginning, middle, and near-completion fixtures. It reports capsule and prompt counts separately, including deliberate capsule-edge repetition of `next_action` and both `resume_validation` values. The continuation prompt must retain exact identity/action/validation/ownership data while omitting full goal prose.
 
 A live `/hooks` check is separate from static validation. Its JSON must be no more than 24 hours old and bind `UserPromptSubmit`, `PreToolUse`, `PreCompact`, and `Stop`, the current plugin version, `hooks/hooks.json` SHA-256, and SHA-256 values for all three adapters.
 
@@ -52,7 +54,7 @@ Before observing V3 results, freeze at least 20 representative fresh tasks, pair
 - acknowledgement outcomes and attempt/failure counts
 - source-stop capability, outcome, latency, and attempt/failure counts
 - duplicate destinations, ownership conflicts, retries, `termination_pending` observation/recovery, and human-intervention count
-- exact continuation checks for next-step selection, retained constraints, no repeated completed work, no skipped remaining work, repository/goal reconciliation, validation quality, and middle-positioned fact recovery
+- exact continuation checks for `next_action` selection, retained constraints, no repeated completed work, no skipped remaining work, repository/goal reconciliation, resume-validation quality, and middle-positioned fact recovery
 
 All counts and token components are non-negative integers. Applicable latencies are finite and non-negative. A passing ready candidate row has zero post-acknowledgement source tokens and actions. Do not remove failed, blocked, `resume_ready:false`, termination-pending, or intervention rows. Their quality treatment and observability stay in the denominator.
 
@@ -90,7 +92,7 @@ A future acknowledgement-gated token-efficiency claim requires a bound V3 study 
 
 V3 goal accounting spans the complete source-to-destination chain and does not reset at acknowledgement or task creation. It is still narrower than complete starting context, transcript size, cached/uncached input, output usage, billing totals, or total context consumption. Byte measurements and approximate token estimates never substitute for aggregate `tokensUsed`. Exact cost requires provider usage-category telemetry; otherwise cost numbers are sensitivity scenarios only.
 
-Static V3 observability reports capsule/prompt byte distributions; readiness and failure rates; transfer, acknowledgement, and stop latency summaries; acknowledgement outcomes; post-acknowledgement source activity; duplicate work/destinations; ownership conflicts; stop capability/result distribution; retry distribution; termination-pending recovery; intervention; and each continuation check. These observations come from sanitized study rows or retained events and never mutate ownership state.
+Static V3 observability reports capsule/prompt byte distributions; readiness and failure rates; transfer, acknowledgement, and stop latency summaries; acknowledgement outcomes; post-acknowledgement source activity; duplicate work/destinations; ownership conflicts; stop capability/result distribution; retry distribution; termination-pending recovery; intervention; and each continuation check. These observations come from sanitized study rows or retained events and never mutate ownership state. Byte/proxy density measurements remain diagnostic even when the candidate is smaller.
 
 Even passing evidence does not silently change release claims. `.codex-plugin/release-policy.json` must remain the exact four-field `experimental_non_claim` document until a separately approved release changes that public contract.
 

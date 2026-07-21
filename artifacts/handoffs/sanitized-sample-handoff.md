@@ -22,6 +22,14 @@ transfer_nonce: <one-use-nonce>
 
 - Run `bash validate.sh` and resolve the first failing check.
 
+### Resume Validation Command
+
+- `bash validate.sh`
+
+### Resume Validation Expected
+
+- Exit 0 and print `=== all checks passed ===`.
+
 ### Completion / Stop Condition
 
 - Targeted tests and the full validation gate pass.
@@ -35,6 +43,8 @@ transfer_nonce: <one-use-nonce>
 - Do not claim token savings before the paired empirical gate passes.
 
 ## Supporting State
+
+Absent optional state: decisions, blockers
 
 ### Active Task
 
@@ -50,23 +60,13 @@ transfer_nonce: <one-use-nonce>
 - Run the full validation gate.
 - Capture the live hook load/trust result.
 
-### Decisions
-
-- Cap capsules at 4096 encoded UTF-8 bytes.
-- Cap the one transported prompt at 1024 encoded UTF-8 bytes.
-- Treat the `0.30` threshold as experimental and host-dependent.
-
-### Blockers / Risks
-
-- The live `/hooks` trust check requires a Codex CLI session.
-
 ### Authoritative Files / Symbols
 
 - `skills/checkpoint-and-continue/SKILL.md`
 - `skills/checkpoint-and-continue/scripts/write_handoff.py::build_bounded_capsule`
 - `skills/checkpoint-and-continue/scripts/context_handoff.py::official_hook_response`
 
-### Validation
+### Validation Evidence
 
 - Targeted unit tests passed after the runtime change.
 - Full validation has not run after the documentation update.
@@ -74,14 +74,15 @@ transfer_nonce: <one-use-nonce>
 ## Execution / Ownership Close
 
 - Action now: Run `bash validate.sh` and resolve the first failing check.
-- Smallest validation: Run the targeted unit tests.
+- Resume validation command: `bash validate.sh`
+- Resume validation expected: Exit 0 and print `=== all checks passed ===`.
 - Source session: <session-id>
 - Transfer ID: r4-<nonce-hash>
 - Goal identity: goal:sha256:<sha256>
 - Revision: 4
 - Capsule SHA-256: compare this file with the exact authoritative transport SHA-256
 - Nonce: <one-use-nonce>
-- Acknowledge only after exact identity and smallest-validation verification.
+- Acknowledge only after exact identity and resume-validation verification.
 - The destination becomes sole writer only after exact acknowledgement; before then the source remains authoritative.
 
 ## Overflow Evidence
@@ -92,4 +93,4 @@ sha256: <sha256>
 ## Notes
 
 - This committed artifact is sanitized. A production clean task must use the exact runtime path/SHA/source/transfer/goal/revision/nonce identity from its delivery result and verify `resume_ready:true`; it must not discover a checkpoint by timestamp or “latest” name.
-- The continuation prompt is intentionally absent from the capsule and all pointers.
+- The continuation prompt is intentionally absent from the capsule and all pointers. Its bounded transport form carries canonical `next_action` and exact `resume_validation` but omits full goal prose.

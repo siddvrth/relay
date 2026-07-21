@@ -40,7 +40,7 @@ The runtime directory is gitignored because it may contain private worktree deta
 
 ## Self-Contained Kernel
 
-Every ready revision contains enough critical state to resume independently. Its opening identity kernel carries objective, phase/status, next action, completion condition, and constraints; the middle carries progress and evidence; the closing block repeats action-now and smallest validation with exact source/transfer/goal/revision/nonce identity and the sole-writer-after-acknowledgement rule. The final capsule SHA-256 is necessarily external to the bytes it hashes, so the close requires comparison to the exact transport/pointer/transfer-record digest.
+Every ready revision contains enough critical state to resume independently. Its opening identity kernel carries objective, phase/status, canonical `next_action`, exact `resume_validation.command`/`.expected`, completion condition, and constraints; the middle carries required remaining work and authoritative files plus optional completed work, decisions, blockers, and historical `validation_evidence`; the closing block deliberately repeats action and resume validation with exact source/transfer/goal/revision/nonce identity and the sole-writer-after-acknowledgement rule. Known-empty optional arrays render as one compact absence line rather than filler. The final capsule SHA-256 is necessarily external to the bytes it hashes, so the close requires comparison to the exact transport/pointer/transfer-record digest.
 
 The previous revision is optional evidence. It can help rank changed facts or compute metrics, but it is never an ancestry dependency.
 
@@ -51,7 +51,7 @@ Encoded UTF-8 byte caps are authoritative:
 
 Callers may choose smaller byte budgets, but larger overrides are rejected before state or delivery writes. If optional evidence does not fit, it moves to a content-addressed overflow object. If the critical kernel does not fit—or if the optional overflow reference cannot fit beside the kernel—the emitted safe capsule has `resume_ready:false` and no continuation prompt; autonomous switching is blocked.
 
-Prompt transport has its own guard. The mandatory prompt block contains exact path/SHA/source/transfer/goal/revision/nonce identity, smallest validation, and acknowledgement ownership rule. If it exceeds the prompt budget, the capsule can remain ready while `prompt_guard.fits:false` blocks delivery.
+Prompt transport has its own guard. The mandatory prompt block contains exact path/SHA/source/transfer/goal/revision/nonce identity, `next_action`, both exact `resume_validation` values, and acknowledgement/ownership rules. It omits full goal prose. If it exceeds the prompt budget, the capsule can remain ready while `prompt_guard.fits:false` blocks delivery.
 
 ## State Flow
 
@@ -63,7 +63,7 @@ Prompt transport has its own guard. The mandatory prompt block contains exact pa
 6. The orchestrator writes metadata-only session and repo-latest pointers.
 7. Independently, prompt fit and the session delivery ledger decide whether the one bounded prompt may be transported.
 8. The adapter translates internal JSON into the event's official hook envelope.
-9. A clean task verifies exact identity plus live repo/goal state and the smallest validation, then explicitly acknowledges.
+9. A clean task verifies exact identity plus live repo/goal state, the bound `next_action`, and exact `resume_validation`, then explicitly acknowledges.
 10. Acknowledgement writes the source tombstone and atomically publishes destination ownership before any stop request. Destination implementation waits for observed source quiescence or durable read-only `termination_pending` with `can_continue:true`.
 
 ## Revision And Delivery Invariant

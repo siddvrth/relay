@@ -96,15 +96,39 @@ for session_id in a b plugin-a plugin-b; do
     --phase "validation" \
     --status "in progress" \
     --completion-criteria "official hook response is valid" \
-    --completed-work "installed canonical runtime" \
     --remaining-work "inspect smoke response" \
     --constraints "use the installed standard-library runtime" \
-    --decisions "validate event-specific envelopes" \
-    --blockers "live host trust remains separate" \
-    --validation-status "installed tests passed" \
     --authoritative-files "scripts/workflow/checkpoint_and_continue_hook.sh" \
-    --next-step "inspect the official hook response" >/dev/null
+    --resume-validation-command "python3 -V" \
+    --resume-validation-expected "exit 0" \
+    --next-action "inspect the official hook response" >/dev/null
 done
+
+python3 - "$SMOKE_REPO" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+states = {}
+for path in (repo / ".omx/state/checkpoint-and-continue/sessions").glob("*/.active-task.json"):
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    states[payload["session_id"]] = payload
+
+assert set(states) == {"a", "b", "plugin-a", "plugin-b"}
+for payload in states.values():
+    assert payload["completed_work"] == []
+    assert payload["decisions"] == []
+    assert payload["blockers"] == []
+    assert payload["validation_evidence"] == []
+    assert payload["next_action"] == "inspect the official hook response"
+    assert "next_step" not in payload
+    assert payload["resume_validation"] == {
+        "command": "python3 -V",
+        "expected": "exit 0",
+    }
+PY
+echo "fresh-install canonical optional-state seed: OK"
 
 threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"a","context_usage_percent":31}' | bash scripts/workflow/checkpoint_and_continue_hook.sh UserPromptSubmit 2>/dev/null)"
 compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"b","context_usage_percent":1}' | bash scripts/workflow/checkpoint_and_continue_hook.sh PreCompact 2>/dev/null)"
@@ -112,6 +136,9 @@ capsule_count="$(find "$SMOKE_REPO/.omx/state/checkpoint-and-continue" -name '*-
 
 [[ "$threshold" == *'"hookEventName": "UserPromptSubmit"'* ]]
 [[ "$threshold" == *'"additionalContext"'* ]]
+[[ "$threshold" == *'Exact next action: inspect the official hook response.'* ]]
+[[ "$threshold" == *'Resume validation expected: exit 0.'* ]]
+[[ "$threshold" != *'fresh-install smoke objective'* ]]
 [[ "$compact" == *'"continue": true'* ]]
 [[ "$compact" != *'hookSpecificOutput'* ]]
 [[ "$capsule_count" == "2" ]]
@@ -121,6 +148,9 @@ plugin_threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-a","contex
 plugin_compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-b","context_usage_percent":1}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/checkpoint_and_continue_hook.sh" PreCompact 2>/dev/null)"
 [[ "$plugin_threshold" == *'"hookEventName": "UserPromptSubmit"'* ]]
 [[ "$plugin_threshold" == *'"additionalContext"'* ]]
+[[ "$plugin_threshold" == *'Exact next action: inspect the official hook response.'* ]]
+[[ "$plugin_threshold" == *'Resume validation expected: exit 0.'* ]]
+[[ "$plugin_threshold" != *'fresh-install smoke objective'* ]]
 [[ "$plugin_compact" == *'"continue": true'* ]]
 [[ "$plugin_compact" != *'hookSpecificOutput'* ]]
 echo "plugin-bundled hook lifecycle: OK"

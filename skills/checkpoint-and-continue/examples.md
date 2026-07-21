@@ -1,6 +1,6 @@
 # Fresh Handoff Examples
 
-These examples use a concrete session ID and the full critical kernel. Replace sample values with current facts; do not use placeholders such as `TBD`, `unknown`, or `none` in critical fields.
+These examples use a concrete session ID and the full critical kernel. Replace sample values with current facts; do not use placeholders such as `TBD`, `unknown`, or `none` in critical fields. Optional `completed_work`, `decisions`, `blockers`, and `validation_evidence` may be absent; the writer persists their known-empty arrays without filler.
 
 ## Seed A Ready Session
 
@@ -15,15 +15,15 @@ python3 .agents/skills/checkpoint-and-continue/scripts/write_handoff.py \
   --phase "implementation" \
   --status "Core edit complete; tests pending" \
   --completion-criteria "Targeted and full validation pass" \
-  --completed-work "Implemented the approved runtime change" \
   --remaining-work "Run tests and resolve any regression" \
   --constraints "Do not add dependencies" \
-  --decisions "Keep the existing standard-library architecture" \
-  --blockers "No known external blocker" \
   --authoritative-files "src/example.py" \
-  --validation-status "No post-edit validation has run" \
+  --resume-validation-command "python3 tests/test_example.py" \
+  --resume-validation-expected "exit 0 and all selected tests pass" \
   --next-action "Run the targeted test and fix the first failure"
 ```
+
+This beginning-of-work seed is ready without optional filler. Add repeatable `--validation-evidence` only for historical results that actually exist. `--validation-status` and `--next-step` remain legacy input aliases; new state is written as `validation_evidence` and `next_action`, and historical evidence never substitutes for exact `resume_validation`.
 
 ## Manual Milestone Revision
 
@@ -83,7 +83,9 @@ python3 .agents/skills/checkpoint-and-continue/scripts/write_handoff.py \
   --decisions "Use self-contained session revisions" \
   --blockers "Live hook trust check requires Codex CLI" \
   --authoritative-files "skills/checkpoint-and-continue/SKILL.md" \
-  --validation-status "Targeted tests passed; full gate pending" \
+  --validation-evidence "Targeted tests passed" \
+  --resume-validation-command "bash validate.sh" \
+  --resume-validation-expected "exit 0 and all checks pass" \
   --next-action "Run the full validation gate" \
   --goal-objective "Ship the feature without quality regression"
 ```
@@ -110,7 +112,7 @@ An undersized prompt budget is different: with a complete kernel, `--prompt-budg
 
 ## Safe Clean-Task Input
 
-The generated prompt already carries the exact path, session, revision, and SHA-256. Use the exact values from one ready, delivered internal result; do not substitute a directory scan or a “latest” file:
+The generated prompt already carries the exact path, session, revision, SHA-256, `next_action`, and both `resume_validation` values. Use the exact values from one ready, delivered internal result; do not substitute a directory scan or a “latest” file:
 
 ```text
 Use $checkpoint-and-continue.
@@ -122,9 +124,12 @@ Goal identity: <exact goal_identity from this delivery>
 Expected revision: <exact revision from this delivery>
 Nonce: <exact transfer_nonce from this delivery>
 Expected readiness: true
-Read AGENTS.md and the complete capsule. Verify the exact identity and final SHA-256 against the authoritative transport, inspect live repository/goal state, and run the recorded smallest validation. Run transfer_control.py verify, then acknowledge the exact identity. The source remains authoritative and this destination remains control-only before acknowledgement. After acknowledgement, wait for status can_continue:true before executing the exact next action.
+Exact next action: <exact next_action from this delivery>
+Resume validation command: <exact resume_validation.command from this delivery>
+Resume validation expected: <exact resume_validation.expected from this delivery>
+Read AGENTS.md and the complete capsule. Verify the exact identity and final SHA-256 against the authoritative transport, inspect live repository/goal state, and run the recorded resume validation. Run transfer_control.py verify with the bound action/validation values, then acknowledge the exact identity. The source remains authoritative and this destination remains control-only before acknowledgement. After acknowledgement, wait for status can_continue:true before executing the exact next action.
 ```
 
-Only one copy of this continuation instruction belongs in the transport. Do not embed it in the capsule or any pointer.
+Only one copy of this continuation instruction belongs in the transport. Do not embed it in the capsule or any pointer. Full goal prose is intentionally omitted from the prompt; the exact capsule and `goal_identity` bind the destination to the live goal check.
 
-The exact `verify` and `acknowledge` commands require source session, transfer ID, destination session/task IDs, goal identity, capsule path/revision/SHA-256, and nonce. `verify` additionally requires `--repository-inspected`, `--goal-inspected`, the exact next action, and smallest validation. Use values from the one delivered transfer record; never reconstruct them from a newest-file scan. An exact acknowledgement retry is idempotent, but any stale, replayed, or cross-session mismatch is rejected.
+The exact `verify` and `acknowledge` commands require source session, transfer ID, destination session/task IDs, goal identity, capsule path/revision/SHA-256, and nonce. `verify` additionally requires `--repository-inspected`, `--goal-inspected`, the exact `next_action`, and both exact `resume_validation` values. Use values from the one delivered transfer record; never reconstruct them from a newest-file scan. An exact acknowledgement retry is idempotent, but any stale, replayed, or cross-session mismatch is rejected.
