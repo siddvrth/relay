@@ -4,6 +4,7 @@ __pycache__/
 
 # Local runtime state
 .omx/
+.omo/
 .agents/
 
 # OS/editor noise

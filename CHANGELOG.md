@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-07-25
+
 - Added acknowledgement-gated single-writer transfer state with exact source/destination/goal/revision/SHA-256/nonce binding, replay-safe ownership publication, and truthful `termination_pending` fallback.
 - Added edge-structured capsules with an opening identity kernel, compact supporting middle, and closing execution/ownership block; the bounded prompt carries the exact final capsule SHA-256 because a capsule cannot embed its own digest.
 - Added `PreToolUse` authority enforcement across plugin, CLI, and installed adapters and bound `transfer_control.py` into release-runtime digests.
