@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Renamed the bundled skill from `checkpoint-and-continue` to `relay` for shorter Codex `/` invocation and clearer branding.
+- Added the Codex App launch envelope that records one stable create intent, starts exactly one clean `create_thread` task with the existing bounded prompt, and leaves the 30% trigger explicitly host-limited when context telemetry is absent.
 
 ## 0.3.0 - 2026-07-25
 

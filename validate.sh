@@ -77,6 +77,7 @@ python3 "$PKG/scripts/test_release_readiness.py"
 python3 "$SKILL/test_transfer_control.py" -q
 python3 "$SKILL/test_transfer_integration.py" -q
 python3 "$SKILL/test_transfer_hostile.py" -q
+python3 "$SKILL/test_codex_app_handoff.py" -q
 python3 "$SKILL/test_write_handoff.py"
 
 # Smoke from a fresh installed repo so validation cannot pass because of a stale host .agents copy.
@@ -166,7 +167,10 @@ for session_id, payload in thresholds:
     assert set(payload) <= official_keys
     specific = payload["hookSpecificOutput"]
     assert specific["hookEventName"] == "UserPromptSubmit"
-    prompt = specific["additionalContext"]
+    app_envelope = json.loads(specific["additionalContext"])
+    assert app_envelope["contract"] == "relay.codex_app.clean_task.v1"
+    assert app_envelope["app_action"] == "create_thread"
+    prompt = app_envelope["initial_prompt"]
     pointer = next(
         candidate
         for path in (repo / ".omx/state/relay/sessions").glob("*/.pointer.json")

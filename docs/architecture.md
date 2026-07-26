@@ -76,9 +76,9 @@ This separation prevents stale state while retaining one delivery per session co
 
 The internal orchestrator result includes capsule, readiness, revision, metrics, overflow, and delivery data. Official hook stdout is a separate translation:
 
-- `UserPromptSubmit` can return common fields plus `hookSpecificOutput.additionalContext`
+- a ready `UserPromptSubmit` returns common fields plus a `relay.codex_app.clean_task.v1` launch envelope in `hookSpecificOutput.additionalContext`
 - `PreToolUse` denies write-capable tools for revoked sources and control-only destinations while permitting exact canonical transfer control
-- `PreCompact` and `Stop` use common fields only
+- a ready `PreCompact` returns the same App launch envelope in the common `systemMessage`; `Stop` uses common fields only
 
 Official [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) documents `session_id` for all command hooks and `prompt` for `UserPromptSubmit`, but not a context ratio. The `0.30` trigger is therefore experimental and host-dependent; compatible extra telemetry may enable it, while `PreCompact` is the deterministic documented fallback.
 

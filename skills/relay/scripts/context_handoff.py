@@ -600,7 +600,7 @@ def lifecycle_next_actions(
     repo: Path,
     transfer: dict[str, Any],
     *,
-    create_thread_available: bool,
+    create_thread_available: bool | None,
 ) -> list[dict[str, Any]]:
     source = str(transfer.get("session_id") or transfer.get("source_session_id") or "<source-session-id>")
     transfer_id = str(transfer.get("transfer_id") or "<transfer-id>")
@@ -620,7 +620,7 @@ def lifecycle_next_actions(
     return [
         {
             "phase": "launch_requested",
-            "command_argv": [*base, "launch-requested", "--source-session-id", source, "--transfer-id", transfer_id, "--transport-key", "<create-intent-id>"],
+            "command_argv": [*base, "launch-requested", "--source-session-id", source, "--transfer-id", transfer_id, "--transport-key", transfer_id],
         },
         {
             "phase": "create_clean_task",
@@ -631,7 +631,7 @@ def lifecycle_next_actions(
         {
             "phase": "delivered_and_started",
             "commands_argv": [
-                [*base, "delivered", "--source-session-id", source, "--transfer-id", transfer_id, "--transport-key", "<create-intent-id>", "--destination-task-id", "<destination-task-id>"],
+                [*base, "delivered", "--source-session-id", source, "--transfer-id", transfer_id, "--transport-key", transfer_id, "--destination-task-id", "<destination-task-id>"],
                 [*base, "started", "--source-session-id", source, "--transfer-id", transfer_id, "--destination-session-id", "<destination-session-id>", "--destination-task-id", "<destination-task-id>"],
             ],
         },
@@ -687,25 +687,39 @@ def app_capability_guidance(
     repo: Path | None = None,
     transfer: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    raw = payload.get("available_thread_tools") or payload.get("availableTools") or []
-    available = {str(item) for item in raw} if isinstance(raw, list) else set()
+    raw = payload.get("available_thread_tools")
+    if raw is None:
+        raw = payload.get("availableTools")
+    tools_reported = isinstance(raw, list)
+    available = {str(item) for item in raw} if tools_reported else set()
+    create_thread_available = (
+        "create_thread" in available if tools_reported else None
+    )
+    read_thread_available = "read_thread" in available if tools_reported else None
+    handoff_thread_available = (
+        "handoff_thread" in available if tools_reported else None
+    )
     return {
         "capability_gated": True,
-        "create_clean_task_supported": "create_thread" in available,
-        "observe_destination_supported": "read_thread" in available,
+        "create_clean_task_supported": create_thread_available,
+        "observe_destination_supported": read_thread_available,
         "target_interrupt_isolation_supported": False,
-        "handoff_thread_candidate_available": "handoff_thread" in available,
+        "handoff_thread_candidate_available": handoff_thread_available,
         "handoff_thread_rule": (
             "candidate only after acknowledgement, verified target authority, and checkout compatibility; never generic interrupt or close support"
-            if "handoff_thread" in available
-            else "unavailable; persist termination_pending after enforced read-only"
+            if handoff_thread_available is True
+            else (
+                "unavailable; persist termination_pending after enforced read-only"
+                if handoff_thread_available is False
+                else "host capability unreported; do not infer interruption support"
+            )
         ),
         "visible_archive_is_separate": True,
         "lifecycle_next_actions": (
             lifecycle_next_actions(
                 repo,
                 transfer,
-                create_thread_available="create_thread" in available,
+                create_thread_available=create_thread_available,
             )
             if repo is not None and transfer is not None
             else []
@@ -747,6 +761,41 @@ def _empty_result(args: argparse.Namespace, context_ratio: float | None) -> dict
     }
 
 
+def codex_app_launch_context(internal: dict[str, Any]) -> str | None:
+    prompt = internal.get("continuation_prompt")
+    actions = internal.get("lifecycle_next_actions")
+    if (
+        internal.get("delivery_emitted") is not True
+        or not isinstance(prompt, str)
+        or not prompt
+        or not isinstance(actions, list)
+    ):
+        return None
+    launch_actions = [
+        action
+        for action in actions
+        if isinstance(action, dict)
+        and action.get("phase")
+        in {"launch_requested", "create_clean_task", "delivered_and_started"}
+    ]
+    return json.dumps(
+        {
+            "contract": "relay.codex_app.clean_task.v1",
+            "execute": True,
+            "app_action": "create_thread",
+            "project_environment": "local",
+            "initial_prompt": prompt,
+            "lifecycle": launch_actions,
+            "destination_id_source": "create_thread.threadId",
+            "create_count": 1,
+            "unknown_outcome": "reconcile_do_not_retry",
+            "source_stop_gate": "destination_acknowledged",
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
 def official_hook_response(
     event: str,
     internal: dict[str, Any],
@@ -779,18 +828,24 @@ def official_hook_response(
             return {"continue": False, "stopReason": reason}
 
     if event == "UserPromptSubmit":
-        prompt = internal.get("continuation_prompt")
-        if internal.get("delivery_emitted") and isinstance(prompt, str) and prompt:
+        launch_context = codex_app_launch_context(internal)
+        if launch_context is not None:
             return {
                 "continue": True,
                 "hookSpecificOutput": {
                     "hookEventName": "UserPromptSubmit",
-                    "additionalContext": prompt,
+                    "additionalContext": launch_context,
                 },
             }
         return {"continue": True}
 
     if event == "PreCompact":
+        launch_context = codex_app_launch_context(internal)
+        if launch_context is not None:
+            return {
+                "continue": True,
+                "systemMessage": launch_context,
+            }
         if internal.get("checkpoint_written"):
             return {
                 "continue": True,

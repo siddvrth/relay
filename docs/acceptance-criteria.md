@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | Host-dependent threshold | Compatible telemetry at or above `0.30` can trigger; absent ratio does not produce an exact 30%-used claim | Compatibility and missing-ratio tests |
 | Deterministic fallback | `PreCompact` follows the checkpoint path regardless of ratio | Hook lifecycle tests |
-| Event-specific output | `UserPromptSubmit` may add one `additionalContext`; `PreToolUse` emits a permission decision; `PreCompact` and `Stop` emit common fields only | Official-envelope schema tests |
+| Event-specific output | A ready `UserPromptSubmit` adds one machine-readable App launch envelope in `additionalContext`; a ready `PreCompact` carries the same envelope in the common `systemMessage`; `PreToolUse` emits a permission decision and `Stop` emits common fields only | Official-envelope schema tests |
 | Internal/official separation | Internal metrics and orchestration fields do not leak into official stdout | Adapter tests |
 | Cross-surface parity | Canonical skill, plugin, CLI, and workflow adapters agree on normalized kernel/readiness/revision/delivery decisions | Parity tests |
 | Hook trust | `/hooks` evidence is <=24 hours old and binds loaded/trusted events to current plugin version, hook-manifest hash, and all three adapter hashes | Live Codex CLI evidence; static install is insufficient |

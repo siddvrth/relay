@@ -31,9 +31,9 @@ The adapters keep internal and official JSON separate:
 
 | Event | Allowed Fresh Handoff response |
 | --- | --- |
-| `UserPromptSubmit` | Common fields plus one `hookSpecificOutput.additionalContext` prompt when delivery is emitted |
+| `UserPromptSubmit` | Common fields plus one `relay.codex_app.clean_task.v1` source launch envelope in `hookSpecificOutput.additionalContext` when delivery is emitted |
 | `PreToolUse` | Deny source/pending-destination writes; allow strict read-only and canonical transfer-control operations |
-| `PreCompact` | Common output fields only |
+| `PreCompact` | Common fields; a delivery-emitting checkpoint carries the same source launch envelope in `systemMessage` |
 | `Stop` | Common output fields only |
 
 Internal capsule paths, metrics, guards, overflow records, delivery details, and V3 observation rows do not leak into official stdout unless the schema allows them. Adapters must not fabricate unavailable acknowledgement, stop, latency, token, or intervention telemetry. Errors fail open with `{"continue":true}`.

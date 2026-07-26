@@ -152,9 +152,9 @@ The continuation prompt exists in this transport result only. Its mandatory bloc
 
 Internal JSON is not written directly to a hook's stdout. The adapters translate it by event:
 
-- `UserPromptSubmit`: common output fields plus `hookSpecificOutput.hookEventName="UserPromptSubmit"` and one `additionalContext` prompt only when delivery is emitted; acknowledged/revoked sources are blocked
+- `UserPromptSubmit`: common output fields plus `hookSpecificOutput.hookEventName="UserPromptSubmit"` and one `relay.codex_app.clean_task.v1` source launch envelope only when delivery is emitted; the envelope carries the bounded destination prompt unchanged; acknowledged/revoked sources are blocked
 - `PreToolUse`: exact transfer-control/read-only commands are allowed while pending; write-capable tools are denied for revoked sources and control-only destinations
-- `PreCompact`: common output fields only; no UserPromptSubmit-specific object
+- `PreCompact`: common output fields only; a delivery-emitting checkpoint places the same source launch envelope in `systemMessage`, with no UserPromptSubmit-specific object
 - `Stop`: common output fields only; acknowledgement-gated stop state may force `continue:false`
 
 This matches the documented event-specific shapes in [Codex hooks](https://learn.chatgpt.com/docs/hooks). Extra internal metrics never leak into the official envelope. Hook errors fail open with `{"continue":true}`.
