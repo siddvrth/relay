@@ -1,9 +1,9 @@
 ---
-name: checkpoint-and-continue
+name: relay
 description: Preserve quality across long Codex sessions with bounded, self-contained continuation capsules and clean-task prompts. Use after major milestones, before compaction or pauses, in goal mode, or when a new session must resume without the old transcript.
 ---
 
-# Checkpoint and Continue
+# Relay
 
 ## Purpose
 
@@ -70,7 +70,7 @@ Capsule readiness and transport readiness are independent. The mandatory prompt 
 1. Seed complete task state for the current session:
 
    ```bash
-   python3 .agents/skills/checkpoint-and-continue/scripts/write_handoff.py \
+   python3 .agents/skills/relay/scripts/write_handoff.py \
      --update-active-task-only \
      --session-id "$CODEX_SESSION_ID" \
      --revision 1 \
@@ -115,7 +115,7 @@ The mandatory transported prompt identifies one capsule by exact path, session, 
 Runtime state is under:
 
 ```text
-.omx/state/checkpoint-and-continue/
+.omx/state/relay/
 |-- .latest.json                         # metadata-only convenience pointer
 `-- sessions/<session-hash>/
     |-- .active-task.json
@@ -150,9 +150,9 @@ Important flags include `--session-id`, `--revision`, `--capsule-budget-bytes`, 
 ## Validation
 
 ```bash
-python3 skills/checkpoint-and-continue/scripts/test_write_handoff.py
-python3 skills/checkpoint-and-continue/scripts/test_transfer_control.py
-python3 skills/checkpoint-and-continue/scripts/test_transfer_integration.py
+python3 skills/relay/scripts/test_write_handoff.py
+python3 skills/relay/scripts/test_transfer_control.py
+python3 skills/relay/scripts/test_transfer_integration.py
 python3 scripts/test_release_readiness.py
 python3 scripts/validate_distribution.py
 bash validate.sh

@@ -5,9 +5,9 @@ Fresh Handoff has two independent evidence lanes. Static validation proves the a
 ## Static Validation
 
 ```bash
-python3 skills/checkpoint-and-continue/scripts/test_write_handoff.py
-python3 skills/checkpoint-and-continue/scripts/test_transfer_control.py
-python3 skills/checkpoint-and-continue/scripts/test_transfer_integration.py
+python3 skills/relay/scripts/test_write_handoff.py
+python3 skills/relay/scripts/test_transfer_control.py
+python3 skills/relay/scripts/test_transfer_integration.py
 python3 scripts/test_release_readiness.py
 python3 scripts/validate_distribution.py
 bash validate.sh
@@ -105,7 +105,7 @@ That result failed the token-efficiency gate. It is useful negative baseline evi
 The historical report remains reproducible with caller-supplied pricing:
 
 ```bash
-python3 skills/checkpoint-and-continue/scripts/goal_telemetry_report.py \
+python3 skills/relay/scripts/goal_telemetry_report.py \
   --clean-tokens 1824,1863,1863,1826,2162,4823,3581,10931,3733,4760,6078,4870,3726,3176,10531,3690,21704,6485,5709,3809 \
   --fork-tokens 2017,2038,1960,2006,2033,5506,3659,7879,3367,4841,6000,4801,3300,2926,6164,3485,4590,4569,4422,5254 \
   --model <model-id> \

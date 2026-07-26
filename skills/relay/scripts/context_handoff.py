@@ -135,7 +135,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--handoff-key", default="")
     parser.add_argument(
         "--objective",
-        default=os.environ.get("CHECKPOINT_AND_CONTINUE_OBJECTIVE", ""),
+        default=os.environ.get("RELAY_OBJECTIVE", ""),
     )
     parser.add_argument("--active-task", default="")
     parser.add_argument("--phase", default="")
@@ -148,11 +148,11 @@ def parse_args() -> argparse.Namespace:
         "--next-step",
         "--next-action",
         dest="next_step",
-        default=os.environ.get("CHECKPOINT_AND_CONTINUE_NEXT_STEP", ""),
+        default=os.environ.get("RELAY_NEXT_STEP", ""),
     )
     parser.add_argument(
         "--goal-objective",
-        default=os.environ.get("CHECKPOINT_AND_CONTINUE_GOAL_OBJECTIVE", ""),
+        default=os.environ.get("RELAY_GOAL_OBJECTIVE", ""),
     )
     parser.add_argument("--reason", default="context threshold handoff")
     parser.add_argument(

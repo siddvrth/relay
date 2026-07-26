@@ -12,7 +12,7 @@ Fresh Handoff preserves only the minimum durable state needed for safe continuat
 
 ## Do Not Commit These
 
-- `.omx/state/checkpoint-and-continue/` session directories
+- `.omx/state/relay/` session directories
 - `.active-task.json`, `.revision.json`, `.delivery.json`, `.pointer.json`, `.latest.json`, `.active-transfer.json`, `.ownership.json`, `.revoked.json`, transfer journals, or lock files from a live workspace
 - content-addressed overflow objects from private work
 - raw capsules, transcripts, hook payloads, prompts, or command logs from unrelated projects

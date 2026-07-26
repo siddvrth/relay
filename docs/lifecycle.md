@@ -4,7 +4,7 @@ Fresh Handoff repeats five stages for each Codex session: seed, refresh, decide 
 
 ## 1. Seed A Complete Session Kernel
 
-Seed the current session before automatic hooks need it. Use the full command in [Fresh Handoff examples](../skills/checkpoint-and-continue/examples.md#seed-a-ready-session); objective and next action alone are intentionally insufficient.
+Seed the current session before automatic hooks need it. Use the full command in [Fresh Handoff examples](../skills/relay/examples.md#seed-a-ready-session); objective and next action alone are intentionally insufficient.
 
 The session's active state must contain concrete values for:
 

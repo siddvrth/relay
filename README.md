@@ -1,8 +1,8 @@
 # Fresh Handoff
 
-Fresh Handoff is a Codex plugin for long-running work. Its `checkpoint-and-continue` skill writes bounded, evidence-backed session revisions so a clean task can resume without the old transcript or a chain of earlier checkpoints.
+Fresh Handoff is a Codex plugin for long-running work. Its `relay` skill writes bounded, evidence-backed session revisions so a clean task can resume without the old transcript or a chain of earlier checkpoints.
 
-The product name is `fresh-handoff`; the bundled skill is `checkpoint-and-continue`.
+The product name is `fresh-handoff`; the bundled skill is `relay`.
 
 ## Contract At A Glance
 
@@ -47,7 +47,7 @@ Codex App can create one clean local task with the emitted prompt when thread to
 
 - `.codex-plugin/plugin.json`: frozen plugin identity and install metadata
 - `.codex-plugin/release-policy.json`: exact machine-readable experimental non-claim policy
-- `skills/checkpoint-and-continue/`: canonical skill, scripts, reference, and examples
+- `skills/relay/`: canonical skill, scripts, reference, and examples
 - `hooks/`: default plugin lifecycle hooks
 - `codex/`: portable Codex CLI/OMX hook adapter
 - `install.sh`: compatibility installer for repo-local `.agents` and workflow copies
@@ -71,18 +71,18 @@ bash install.sh /absolute/path/to/target-repository
 bash audit_install.sh /absolute/path/to/target-repository
 ```
 
-The installer creates `.agents/skills/checkpoint-and-continue/` and `scripts/workflow/checkpoint_and_continue_hook.sh`. Runtime state stays untracked under `.omx/state/checkpoint-and-continue/`.
+The installer creates `.agents/skills/relay/` and `scripts/workflow/relay_hook.sh`. Runtime state stays untracked under `.omx/state/relay/`.
 
 When upgrading from the legacy `session-continuity` skill, canonical skill and hook surfaces are fully staged and verified first. One lock-scoped transaction then swaps both canonical surfaces, publishes any verified copy-on-write state import, and archives the active legacy skill. Any failure restores every prior live surface. Legacy runtime bytes and archived skill bytes remain unchanged, but the legacy writer is no longer active, so installed callers cannot bypass the canonical 4096/1024-byte budgets.
 
-See [examples](skills/checkpoint-and-continue/examples.md) for a full ready-kernel seed. Incomplete seed commands are intentionally non-ready.
+See [examples](skills/relay/examples.md) for a full ready-kernel seed. Incomplete seed commands are intentionally non-ready.
 
 ## Validation And Evidence
 
 ```bash
-python3 skills/checkpoint-and-continue/scripts/test_write_handoff.py
-python3 skills/checkpoint-and-continue/scripts/test_transfer_control.py
-python3 skills/checkpoint-and-continue/scripts/test_transfer_integration.py
+python3 skills/relay/scripts/test_write_handoff.py
+python3 skills/relay/scripts/test_transfer_control.py
+python3 skills/relay/scripts/test_transfer_integration.py
 python3 scripts/test_release_readiness.py
 python3 scripts/validate_distribution.py
 bash validate.sh
@@ -104,8 +104,8 @@ Do not claim token or cost improvement until a preregistered v2 study has at lea
 - [Validation and metrics](docs/metrics.md)
 - [Release process](docs/release.md)
 - [Artifact and privacy policy](docs/artifacts.md)
-- [Skill protocol](skills/checkpoint-and-continue/SKILL.md)
-- [CLI and hook reference](skills/checkpoint-and-continue/reference.md)
+- [Skill protocol](skills/relay/SKILL.md)
+- [CLI and hook reference](skills/relay/reference.md)
 
 ## License
 

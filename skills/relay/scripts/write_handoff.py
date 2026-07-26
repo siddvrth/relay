@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write a bounded, self-contained checkpoint-and-continue capsule."""
+"""Write a bounded, self-contained relay capsule."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ MAX_CAPSULE_BUDGET_BYTES = DEFAULT_CAPSULE_BUDGET_BYTES
 MAX_PROMPT_BUDGET_BYTES = DEFAULT_PROMPT_BUDGET_BYTES
 CAPSULE_VERSION = 2
 ACTIVE_TASK_NAME = ".active-task.json"
-STATE_DIR_NAME = "checkpoint-and-continue"
+STATE_DIR_NAME = "relay"
 
 CRITICAL_FIELDS = (
     "session_id",
@@ -323,7 +323,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transfer-nonce", default="")
     parser.add_argument(
         "--objective",
-        default=os.environ.get("CHECKPOINT_AND_CONTINUE_OBJECTIVE", ""),
+        default=os.environ.get("RELAY_OBJECTIVE", ""),
     )
     parser.add_argument("--active-task", default="")
     parser.add_argument("--phase", default="")
@@ -359,7 +359,7 @@ def parse_args() -> argparse.Namespace:
         "--next-step",
         "--next-action",
         dest="next_step",
-        default=os.environ.get("CHECKPOINT_AND_CONTINUE_NEXT_STEP", ""),
+        default=os.environ.get("RELAY_NEXT_STEP", ""),
     )
     parser.add_argument("--goal-objective", default="")
     parser.add_argument("--reason", default="context checkpoint")
@@ -795,7 +795,7 @@ def build_continuation_prompt(
     resume_validation_expected: str = "",
 ) -> str | None:
     mandatory_lines = [
-        f"Use $checkpoint-and-continue from {out_path}; read AGENTS.md + capsule; inspect repo/goal.",
+        f"Use $relay from {out_path}; read AGENTS.md + capsule; inspect repo/goal.",
         f"Expected session: {session_id or 'default'}. Expected revision: {revision if revision is not None else 'unspecified'}.",
         f"Expected capsule SHA-256: {capsule_sha256}. Expected goal identity: {goal_identity}.",
         f"Expected transfer nonce: {transfer_nonce}. Expected transfer ID: {transfer_id}.",

@@ -6,7 +6,7 @@ These examples use a concrete session ID and the full critical kernel. Replace s
 
 ```bash
 SESSION_ID="example-session-01"
-python3 .agents/skills/checkpoint-and-continue/scripts/write_handoff.py \
+python3 .agents/skills/relay/scripts/write_handoff.py \
   --update-active-task-only \
   --session-id "$SESSION_ID" \
   --revision 1 \
@@ -30,7 +30,7 @@ This beginning-of-work seed is ready without optional filler. Add repeatable `--
 Manual checkpoints do not depend on the experimental context ratio:
 
 ```bash
-python3 .agents/skills/checkpoint-and-continue/scripts/context_handoff.py \
+python3 .agents/skills/relay/scripts/context_handoff.py \
   --repo . \
   --session-id "$SESSION_ID" \
   --trigger manual \
@@ -46,7 +46,7 @@ This demonstrates an optional compatibility field; official `UserPromptSubmit` d
 
 ```bash
 printf '%s\n' '{"session_id":"example-session-01","prompt":"continue the task","contextUsed":"31%"}' | \
-  python3 .agents/skills/checkpoint-and-continue/scripts/context_handoff.py \
+  python3 .agents/skills/relay/scripts/context_handoff.py \
     --repo . \
     --stdin-json \
     --trigger threshold
@@ -58,7 +58,7 @@ At `31%`, a complete ready session can emit one delivery. Without `contextUsed` 
 
 ```bash
 printf '%s\n' '{"session_id":"example-session-01","hook_event_name":"PreCompact","trigger":"auto"}' | \
-  bash scripts/workflow/checkpoint_and_continue_hook.sh PreCompact
+  bash scripts/workflow/relay_hook.sh PreCompact
 ```
 
 The official response contains common output fields only. It never includes the `UserPromptSubmit`-specific `additionalContext` shape.
@@ -68,7 +68,7 @@ The official response contains common output fields only. It never includes the 
 Seed the same complete kernel with the exact goal text:
 
 ```bash
-python3 .agents/skills/checkpoint-and-continue/scripts/write_handoff.py \
+python3 .agents/skills/relay/scripts/write_handoff.py \
   --update-active-task-only \
   --session-id "$SESSION_ID" \
   --revision 1 \
@@ -82,7 +82,7 @@ python3 .agents/skills/checkpoint-and-continue/scripts/write_handoff.py \
   --constraints "Preserve output quality" \
   --decisions "Use self-contained session revisions" \
   --blockers "Live hook trust check requires Codex CLI" \
-  --authoritative-files "skills/checkpoint-and-continue/SKILL.md" \
+  --authoritative-files "skills/relay/SKILL.md" \
   --validation-evidence "Targeted tests passed" \
   --resume-validation-command "bash validate.sh" \
   --resume-validation-expected "exit 0 and all checks pass" \
@@ -97,7 +97,7 @@ The new task inspects live goal state before recreating or continuing this objec
 An incomplete kernel is useful only to demonstrate fail-closed behavior:
 
 ```bash
-python3 skills/checkpoint-and-continue/scripts/write_handoff.py \
+python3 skills/relay/scripts/write_handoff.py \
   --session-id "diagnostic-session" \
   --revision 1 \
   --objective "Demonstrate readiness failure" \
@@ -115,7 +115,7 @@ An undersized prompt budget is different: with a complete kernel, `--prompt-budg
 The generated prompt already carries the exact path, session, revision, SHA-256, `next_action`, and both `resume_validation` values. Use the exact values from one ready, delivered internal result; do not substitute a directory scan or a “latest” file:
 
 ```text
-Use $checkpoint-and-continue.
+Use $relay.
 Capsule: <exact capsule_path from this delivery>
 SHA-256: <exact capsule_sha256 from this delivery>
 Source session: <exact session_id from this delivery>

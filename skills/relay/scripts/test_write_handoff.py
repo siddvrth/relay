@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lightweight tests for checkpoint-and-continue scripts (stdlib unittest only)."""
+"""Lightweight tests for relay scripts (stdlib unittest only)."""
 
 from __future__ import annotations
 
@@ -24,17 +24,17 @@ SKILL_ROOT = SCRIPTS.parent
 
 def resolve_layout() -> tuple[Path, Path | None]:
     if (
-        SKILL_ROOT.name == "checkpoint-and-continue"
+        SKILL_ROOT.name == "relay"
         and SKILL_ROOT.parent.name == "skills"
         and SKILL_ROOT.parent.parent.name == ".agents"
     ):
         repo = SKILL_ROOT.parents[2]
-        candidates = (repo / "packages/checkpoint-and-continue", repo)
+        candidates = (repo / "packages/relay", repo)
         package_root = next(
             (
                 candidate
                 for candidate in candidates
-                if (candidate / "skills/checkpoint-and-continue").is_dir()
+                if (candidate / "skills/relay").is_dir()
                 and (candidate / "artifacts").is_dir()
             ),
             None,
@@ -44,14 +44,14 @@ def resolve_layout() -> tuple[Path, Path | None]:
             package_root,
         )
 
-    if SKILL_ROOT.name == "checkpoint-and-continue" and SKILL_ROOT.parent.name == "skills":
+    if SKILL_ROOT.name == "relay" and SKILL_ROOT.parent.name == "skills":
         package_root = SKILL_ROOT.parents[1]
         return (
             package_root,
             package_root,
         )
 
-    raise RuntimeError(f"unsupported checkpoint-and-continue test layout: {SKILL_ROOT}")
+    raise RuntimeError(f"unsupported relay test layout: {SKILL_ROOT}")
 
 
 REPO, PACKAGE_ROOT = resolve_layout()
@@ -60,9 +60,9 @@ CONTEXT_HANDOFF = SCRIPTS / "context_handoff.py"
 GOAL_TELEMETRY_REPORT = SCRIPTS / "goal_telemetry_report.py"
 INSTALL = REPO / "install.sh"
 AUDIT_INSTALL = REPO / "audit_install.sh"
-PLUGIN_HOOK = REPO / "hooks/checkpoint_and_continue_hook.sh"
-CODEX_HOOK = REPO / "codex/checkpoint_and_continue_hook.sh"
-WORKFLOW_HOOK = REPO / "scripts/workflow/checkpoint_and_continue_hook.sh"
+PLUGIN_HOOK = REPO / "hooks/relay_hook.sh"
+CODEX_HOOK = REPO / "codex/relay_hook.sh"
+WORKFLOW_HOOK = REPO / "scripts/workflow/relay_hook.sh"
 sys.path.insert(0, str(SCRIPTS))
 from write_handoff import (  # noqa: E402
     build_continuation_prompt,
@@ -209,7 +209,7 @@ def rich_handoff_args(repo: Path, *, session_id: str = "session-rich") -> list[s
         "--resume-validation-expected",
         "exit 0 and 7 tests pass",
         "--authoritative-files",
-        "skills/checkpoint-and-continue/scripts/write_handoff.py::build_markdown",
+        "skills/relay/scripts/write_handoff.py::build_markdown",
         "--next-step",
         "Implement deterministic capsule budgeting in build_markdown",
         "--force-handoff",
@@ -262,7 +262,7 @@ def run_hook(
 
 
 def install_runtime_fixture(repo: Path) -> None:
-    target = repo / ".agents/skills/checkpoint-and-continue"
+    target = repo / ".agents/skills/relay"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(SKILL_ROOT, target)
 
@@ -273,7 +273,7 @@ def seed_ready_state(repo: Path, session_id: str) -> dict[str, object]:
 
 
 def find_latest_pointer(repo: Path) -> tuple[Path, dict[str, object]]:
-    state_root = repo / ".omx/state/checkpoint-and-continue"
+    state_root = repo / ".omx/state/relay"
     for path in sorted(state_root.rglob("*")):
         if not path.is_file() or path.suffix in {".md", ".lock", ".tmp"}:
             continue
@@ -337,7 +337,7 @@ class WriteHandoffTests(unittest.TestCase):
 
                     active_path = (
                         repo
-                        / ".omx/state/checkpoint-and-continue/sessions"
+                        / ".omx/state/relay/sessions"
                         / session_scope(f"optional-{label}")
                         / ".active-task.json"
                     )
@@ -485,7 +485,7 @@ class WriteHandoffTests(unittest.TestCase):
                     repo
                     / ".omx"
                     / "state"
-                    / "checkpoint-and-continue"
+                    / "relay"
                     / "sessions"
                     / session_scope("validation-contract")
                     / ".active-task.json"
@@ -687,8 +687,8 @@ class WriteHandoffTests(unittest.TestCase):
                 "--out",
                 str(out),
                 env={
-                    "CHECKPOINT_AND_CONTINUE_OBJECTIVE": "from env objective",
-                    "CHECKPOINT_AND_CONTINUE_NEXT_STEP": "from env next",
+                    "RELAY_OBJECTIVE": "from env objective",
+                    "RELAY_NEXT_STEP": "from env next",
                 },
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -738,7 +738,7 @@ class WriteHandoffTests(unittest.TestCase):
                 "UTF-8 byte budgets are authoritative",
                 "Live hook trust still requires host validation",
                 "Regression suite added; runtime validation pending",
-                "skills/checkpoint-and-continue/scripts/write_handoff.py::build_markdown",
+                "skills/relay/scripts/write_handoff.py::build_markdown",
                 "Implement deterministic capsule budgeting in build_markdown",
             ]
             for value in required:
@@ -889,7 +889,7 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
                     self.assertFalse(payload["delivery_emitted"])
 
             self.assertFalse(
-                (repo / ".omx/state/checkpoint-and-continue").exists()
+                (repo / ".omx/state/relay").exists()
             )
 
     def test_official_hook_oversized_budget_fails_open_without_delivery(self) -> None:
@@ -910,7 +910,7 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertEqual(json.loads(result.stdout), {"continue": True})
             self.assertFalse(
-                (repo / ".omx/state/checkpoint-and-continue").exists()
+                (repo / ".omx/state/relay").exists()
             )
 
     def test_utf8_byte_budget_is_authoritative_and_token_count_is_approximate(self) -> None:
@@ -1039,7 +1039,7 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
             "constraints": ["No dependencies"],
             "decisions": ["Use byte budgets"],
             "blockers": ["Host trust is unverified"],
-            "authoritative_files": ["skills/checkpoint-and-continue/scripts/context_handoff.py::main"],
+            "authoritative_files": ["skills/relay/scripts/context_handoff.py::main"],
             "validation_evidence": ["Tests collected"],
             "resume_validation": {
                 "command": "python3 focused_test.py",
@@ -1100,7 +1100,7 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
             "constraints": ["No dependencies"],
             "decisions": ["Use byte budgets"],
             "blockers": ["Host trust is unverified"],
-            "authoritative_files": ["skills/checkpoint-and-continue/scripts/context_handoff.py::main"],
+            "authoritative_files": ["skills/relay/scripts/context_handoff.py::main"],
             "validation_evidence": ["Tests collected"],
             "resume_validation": {
                 "command": "python3 focused_test.py",
@@ -1428,7 +1428,7 @@ class ContextHandoffTests(unittest.TestCase):
                             durable_paths.prepare_intent,
                         )
                     }
-                    capsule_root = repo / ".omx/state/checkpoint-and-continue"
+                    capsule_root = repo / ".omx/state/relay"
                     capsules_before = {
                         path: path.read_bytes()
                         for path in capsule_root.rglob("*-handoff.md")
@@ -1480,7 +1480,7 @@ class ContextHandoffTests(unittest.TestCase):
             _pointer_path, pointer = find_latest_pointer(repo)
             self.assertEqual(pointer["revision"], 6)
             capsules = list(
-                (repo / ".omx/state/checkpoint-and-continue").rglob("*-handoff.md")
+                (repo / ".omx/state/relay").rglob("*-handoff.md")
             )
             self.assertEqual(len(capsules), 6)
 
@@ -1842,7 +1842,7 @@ class ContextHandoffTests(unittest.TestCase):
                 contract_value(second_payload, "continuation_prompt", "prompt")
             )
             capsules = list(
-                (repo / ".omx/state/checkpoint-and-continue").rglob("*-handoff.md")
+                (repo / ".omx/state/relay").rglob("*-handoff.md")
             )
             self.assertEqual(len(capsules), 2)
 
@@ -2071,7 +2071,7 @@ class ContextHandoffTests(unittest.TestCase):
                 5,
             )
             self.assertEqual(
-                len(list((repo / ".omx/state/checkpoint-and-continue").rglob("*-handoff.md"))),
+                len(list((repo / ".omx/state/relay").rglob("*-handoff.md"))),
                 1,
             )
 
@@ -2153,7 +2153,7 @@ class ContextHandoffTests(unittest.TestCase):
             self.assertFalse(
                 (
                     repo
-                    / ".omx/state/checkpoint-and-continue/.active-task.json"
+                    / ".omx/state/relay/.active-task.json"
                 ).exists()
             )
             first_task = json.loads(first_path.read_text(encoding="utf-8"))
@@ -2310,7 +2310,7 @@ class HookEnvelopeAndParityTests(unittest.TestCase):
                     list(
                         (
                             precompact_repo
-                            / ".omx/state/checkpoint-and-continue"
+                            / ".omx/state/relay"
                         ).rglob("*-handoff.md")
                     )
                 ),
@@ -2341,7 +2341,7 @@ class HookEnvelopeAndParityTests(unittest.TestCase):
                 list(
                     (
                         no_ratio_repo
-                        / ".omx/state/checkpoint-and-continue"
+                        / ".omx/state/relay"
                     ).rglob("*-handoff.md")
                 ),
                 [],
@@ -2426,7 +2426,7 @@ class LegacyMigrationTests(unittest.TestCase):
             "## Decisions\n\n- Preserve legacy bytes.\n\n"
             "## Blockers / Risks\n\n- Host trust is unknown.\n\n"
             "## Validation Status\n\n- Not yet run.\n\n"
-            "## Files Touched\n\n- skills/checkpoint-and-continue/scripts/write_handoff.py\n"
+            "## Files Touched\n\n- skills/relay/scripts/write_handoff.py\n"
         ).encode("utf-8")
 
     def test_install_imports_newest_legacy_state_copy_on_write_and_idempotently(self) -> None:
@@ -2470,7 +2470,7 @@ class LegacyMigrationTests(unittest.TestCase):
             self.assertEqual(len(archived_markers), 1)
             self.assertEqual(archived_markers[0].read_bytes(), marker)
 
-            canonical = repo / ".omx/state/checkpoint-and-continue"
+            canonical = repo / ".omx/state/relay"
             imported = [
                 path
                 for path in canonical.rglob("*")
@@ -2556,7 +2556,7 @@ class LegacyMigrationTests(unittest.TestCase):
             source = legacy_state / "20260102-000000-000002-handoff.md"
             source.write_bytes(self.legacy_capsule("newer successful import"))
             os.utime(source, (200, 200))
-            sessions_root = repo / ".omx/state/checkpoint-and-continue/sessions"
+            sessions_root = repo / ".omx/state/relay/sessions"
             final_dir = sessions_root / "legacy-import"
             final_dir.mkdir(parents=True)
             previous_import = final_dir / "20260101-000000-000001-handoff.md"
@@ -2582,7 +2582,7 @@ class LegacyMigrationTests(unittest.TestCase):
 
             installed_writer = (
                 repo
-                / ".agents/skills/checkpoint-and-continue/scripts/write_handoff.py"
+                / ".agents/skills/relay/scripts/write_handoff.py"
             )
             result = subprocess.run(
                 [
@@ -2645,7 +2645,7 @@ class LegacyMigrationTests(unittest.TestCase):
             repo = Path(tmp)
             init_repo(repo)
             legacy_state = repo / ".omx/state/session-continuity"
-            canonical_state = repo / ".omx/state/checkpoint-and-continue"
+            canonical_state = repo / ".omx/state/relay"
             legacy_state.mkdir(parents=True)
             canonical_state.mkdir(parents=True)
             legacy = legacy_state / "20260101-000000-000001-handoff.md"
@@ -2695,11 +2695,11 @@ class LegacyMigrationTests(unittest.TestCase):
             repo = Path(tmp) / "repo"
             repo.mkdir()
             init_repo(repo)
-            target_skill = repo / ".agents/skills/checkpoint-and-continue"
+            target_skill = repo / ".agents/skills/relay"
             target_skill.mkdir(parents=True)
             skill_marker = target_skill / "existing-marker.bin"
             skill_marker.write_bytes(b"existing canonical skill\n")
-            target_hook = repo / "scripts/workflow/checkpoint_and_continue_hook.sh"
+            target_hook = repo / "scripts/workflow/relay_hook.sh"
             target_hook.parent.mkdir(parents=True)
             target_hook.write_bytes(b"existing canonical hook\n")
             legacy_skill = repo / ".agents/skills/session-continuity"
@@ -2762,7 +2762,7 @@ class LegacyMigrationTests(unittest.TestCase):
             self.assertFalse((repo / ".agents").exists())
             self.assertFalse((repo / "scripts").exists())
             self.assertEqual(
-                list(repo.rglob(".checkpoint-and-continue-install.*")),
+                list(repo.rglob(".relay-install.*")),
                 [],
             )
             self.assertFalse((repo / ".omx").exists())
@@ -2812,7 +2812,7 @@ class LegacyMigrationTests(unittest.TestCase):
                 self.assertEqual(snapshot(outside), outside_before)
                 self.assertEqual(snapshot(repo), repo_before)
                 self.assertEqual(
-                    list(repo.rglob(".checkpoint-and-continue-install.*")),
+                    list(repo.rglob(".relay-install.*")),
                     [],
                 )
 
@@ -2822,11 +2822,11 @@ class LegacyMigrationTests(unittest.TestCase):
             repo.mkdir()
             init_repo(repo)
 
-            target_skill = repo / ".agents/skills/checkpoint-and-continue"
+            target_skill = repo / ".agents/skills/relay"
             target_skill.mkdir(parents=True)
             skill_marker = target_skill / "existing-marker.bin"
             skill_marker.write_bytes(b"existing canonical skill\n")
-            target_hook = repo / "scripts/workflow/checkpoint_and_continue_hook.sh"
+            target_hook = repo / "scripts/workflow/relay_hook.sh"
             target_hook.parent.mkdir(parents=True)
             target_hook.write_bytes(b"existing canonical hook\n")
             legacy_skill = repo / ".agents/skills/session-continuity"
@@ -2845,7 +2845,7 @@ class LegacyMigrationTests(unittest.TestCase):
             source.write_bytes(self.legacy_capsule("newer migration candidate"))
             os.utime(source, (200, 200))
 
-            sessions_root = repo / ".omx/state/checkpoint-and-continue/sessions"
+            sessions_root = repo / ".omx/state/relay/sessions"
             final_dir = sessions_root / "legacy-import"
             final_dir.mkdir(parents=True)
             previous_import = final_dir / "20260101-000000-000001-handoff.md"
@@ -2890,11 +2890,11 @@ class LegacyMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             init_repo(repo)
-            target_skill = repo / ".agents/skills/checkpoint-and-continue"
+            target_skill = repo / ".agents/skills/relay"
             target_skill.mkdir(parents=True)
             skill_marker = target_skill / "existing-marker.bin"
             skill_marker.write_bytes(b"existing canonical skill\n")
-            target_hook = repo / "scripts/workflow/checkpoint_and_continue_hook.sh"
+            target_hook = repo / "scripts/workflow/relay_hook.sh"
             target_hook.parent.mkdir(parents=True)
             target_hook.write_bytes(b"existing canonical hook\n")
             legacy_skill = repo / ".agents/skills/session-continuity"
@@ -2912,7 +2912,7 @@ class LegacyMigrationTests(unittest.TestCase):
             source = legacy_state / "20260102-000000-000002-handoff.md"
             source.write_bytes(self.legacy_capsule("newer migration candidate"))
             os.utime(source, (200, 200))
-            sessions_root = repo / ".omx/state/checkpoint-and-continue/sessions"
+            sessions_root = repo / ".omx/state/relay/sessions"
             final_dir = sessions_root / "legacy-import"
             final_dir.mkdir(parents=True)
             previous_import = final_dir / "20260101-000000-000001-handoff.md"
@@ -2927,7 +2927,7 @@ class LegacyMigrationTests(unittest.TestCase):
             }
 
             env = os.environ.copy()
-            env["CHECKPOINT_AND_CONTINUE_INSTALL_FAULT"] = "combined_finalize"
+            env["RELAY_INSTALL_FAULT"] = "combined_finalize"
             install = subprocess.run(
                 ["bash", str(INSTALL), str(repo)],
                 text=True,
@@ -2952,7 +2952,7 @@ class LegacyMigrationTests(unittest.TestCase):
             self.assertFalse((repo / ".agents/archived-skills").exists())
             self.assertEqual(list(sessions_root.glob(".legacy-import-*")), [])
             self.assertEqual(
-                list((repo / ".agents").glob(".checkpoint-and-continue-install.*")),
+                list((repo / ".agents").glob(".relay-install.*")),
                 [],
             )
 
@@ -2961,16 +2961,16 @@ class LegacyMigrationTests(unittest.TestCase):
             repo = Path(tmp) / "repo"
             repo.mkdir()
             init_repo(repo)
-            target_skill = repo / ".agents/skills/checkpoint-and-continue"
+            target_skill = repo / ".agents/skills/relay"
             target_skill.mkdir(parents=True)
             skill_marker = target_skill / "existing-marker.bin"
             skill_marker.write_bytes(b"existing canonical skill\n")
-            target_hook = repo / "scripts/workflow/checkpoint_and_continue_hook.sh"
+            target_hook = repo / "scripts/workflow/relay_hook.sh"
             target_hook.parent.mkdir(parents=True)
             target_hook.write_bytes(b"existing canonical hook\n")
 
             env = os.environ.copy()
-            env["CHECKPOINT_AND_CONTINUE_INSTALL_FAULT"] = "canonical_hook_swap"
+            env["RELAY_INSTALL_FAULT"] = "canonical_hook_swap"
             install = subprocess.run(
                 ["bash", str(INSTALL), str(repo)],
                 text=True,
@@ -3001,7 +3001,7 @@ class LegacyMigrationTests(unittest.TestCase):
 
             final_dir = (
                 repo
-                / ".omx/state/checkpoint-and-continue/sessions/legacy-import"
+                / ".omx/state/relay/sessions/legacy-import"
             )
             final_dir.mkdir(parents=True)
             existing = final_dir / "20260101-000000-000001-handoff.md"
@@ -3010,7 +3010,7 @@ class LegacyMigrationTests(unittest.TestCase):
             os.utime(existing, (100, 100))
 
             env = os.environ.copy()
-            env["CHECKPOINT_AND_CONTINUE_INSTALL_FAULT"] = "migration_publish"
+            env["RELAY_INSTALL_FAULT"] = "migration_publish"
             install = subprocess.run(
                 ["bash", str(INSTALL), str(repo)],
                 text=True,

@@ -9,17 +9,17 @@ Fresh Handoff has four layers: plugin distribution, canonical portable source, c
 | `.codex-plugin/plugin.json` | Frozen `fresh-handoff` identity and install metadata |
 | `.codex-plugin/release-policy.json` | Exact four-field experimental non-claim policy |
 | `hooks/` | Plugin-bundled lifecycle definitions and adapter |
-| `skills/checkpoint-and-continue/` | Canonical protocol, reference, examples, and Python runtime |
+| `skills/relay/` | Canonical protocol, reference, examples, and Python runtime |
 | `codex/` | Portable Codex CLI/OMX adapter source |
-| `.agents/skills/checkpoint-and-continue/` | Generated compatibility install |
-| `scripts/workflow/checkpoint_and_continue_hook.sh` | Generated compatibility adapter |
+| `.agents/skills/relay/` | Generated compatibility install |
+| `scripts/workflow/relay_hook.sh` | Generated compatibility adapter |
 
 Edit canonical source first, then reinstall and audit generated surfaces.
 
 ## Runtime State
 
 ```text
-.omx/state/checkpoint-and-continue/
+.omx/state/relay/
 |-- .latest.json                         # metadata-only convenience pointer
 |-- .ownership.json                      # acknowledgement linearization point
 |-- .transfer.lock                       # global lifecycle/ownership serialization
@@ -95,4 +95,4 @@ V3 aggregate telemetry spans the source-before-handoff, handoff-generation, dest
 
 ## Legacy Boundary
 
-`skills/checkpoint-and-continue/` is canonical. `.agents/skills/session-continuity` and `.omx/state/session-continuity` are legacy. Canonical copies are fully staged and verified before any live change. Under one install lock, a single rollback transaction swaps the canonical skill and hook, publishes any verified copy-on-write import, and archives the active legacy skill. Failure restores all prior live surfaces. Original legacy bytes remain untouched; archived legacy writer bytes are retained but inactive, so they cannot bypass canonical budgets.
+`skills/relay/` is canonical. `.agents/skills/session-continuity` and `.omx/state/session-continuity` are legacy. Canonical copies are fully staged and verified before any live change. Under one install lock, a single rollback transaction swaps the canonical skill and hook, publishes any verified copy-on-write import, and archives the active legacy skill. Failure restores all prior live surfaces. Original legacy bytes remain untouched; archived legacy writer bytes are retained but inactive, so they cannot bypass canonical budgets.

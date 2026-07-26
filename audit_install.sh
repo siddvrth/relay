@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify that a repository's installed checkpoint-and-continue surfaces match this package.
+# Verify that a repository's installed relay surfaces match this package.
 set -euo pipefail
 
 PKG="$(cd "$(dirname "$0")" && pwd)"
@@ -47,16 +47,18 @@ check_file() {
   fi
 }
 
-check_dir "$PKG/skills/checkpoint-and-continue" "$REPO/.agents/skills/checkpoint-and-continue" "installed skill"
-check_file "$PKG/codex/checkpoint_and_continue_hook.sh" "$REPO/scripts/workflow/checkpoint_and_continue_hook.sh" "Codex hook stub"
+check_dir "$PKG/skills/relay" "$REPO/.agents/skills/relay" "installed skill"
+check_file "$PKG/codex/relay_hook.sh" "$REPO/scripts/workflow/relay_hook.sh" "Codex hook stub"
 
-if [[ -e "$REPO/.agents/skills/session-continuity" || -L "$REPO/.agents/skills/session-continuity" ]]; then
-  echo "ACTIVE legacy session-continuity skill conflict: $REPO/.agents/skills/session-continuity"
-  failures=$((failures + 1))
-fi
+for legacy_skill in session-continuity checkpoint-and-continue; do
+  if [[ -e "$REPO/.agents/skills/$legacy_skill" || -L "$REPO/.agents/skills/$legacy_skill" ]]; then
+    echo "ACTIVE legacy skill conflict: $REPO/.agents/skills/$legacy_skill"
+    failures=$((failures + 1))
+  fi
+done
 
-if [[ -e "$REPO/.cursor/hooks/checkpoint-and-continue-gate.mjs" ]]; then
-  echo "UNSUPPORTED legacy editor hook: $REPO/.cursor/hooks/checkpoint-and-continue-gate.mjs"
+if [[ -e "$REPO/.cursor/hooks/relay-gate.mjs" ]]; then
+  echo "UNSUPPORTED legacy editor hook: $REPO/.cursor/hooks/relay-gate.mjs"
   failures=$((failures + 1))
 fi
 

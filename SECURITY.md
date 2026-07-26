@@ -4,13 +4,13 @@ Fresh Handoff writes local checkpoint artifacts. Treat those artifacts as sensit
 
 ## Supported Surface
 
-- `skills/checkpoint-and-continue/scripts/write_handoff.py`
-- `skills/checkpoint-and-continue/scripts/context_handoff.py`
-- `skills/checkpoint-and-continue/scripts/transfer_control.py`
+- `skills/relay/scripts/write_handoff.py`
+- `skills/relay/scripts/context_handoff.py`
+- `skills/relay/scripts/transfer_control.py`
 - `.codex-plugin/plugin.json`
 - `hooks/hooks.json`
-- `hooks/checkpoint_and_continue_hook.sh`
-- `codex/checkpoint_and_continue_hook.sh`
+- `hooks/relay_hook.sh`
+- `codex/relay_hook.sh`
 - `install.sh`
 - `audit_install.sh`
 - `completion_gate.sh`
@@ -32,7 +32,7 @@ Do not place these in committed artifacts:
 - private absolute paths from unrelated repositories
 - raw dirty working-tree state from unrelated repositories
 
-The scripts do not intentionally read environment variables beyond documented checkpoint-and-continue defaults.
+The scripts do not intentionally read environment variables beyond documented relay defaults.
 
 ## Security Model
 

@@ -1,6 +1,6 @@
 # Fresh Handoff Reference
 
-This is the low-level v2 contract for the `checkpoint-and-continue` skill. Start with the [project overview](../../README.md) and [installation guide](../../docs/installation.md).
+This is the low-level v2 contract for the `relay` skill. Start with the [project overview](../../README.md) and [installation guide](../../docs/installation.md).
 
 ## Independent Defaults
 
@@ -17,10 +17,10 @@ Changing a byte budget does not change the threshold. Overrides above the canoni
 
 | Variable | Purpose |
 | --- | --- |
-| `CHECKPOINT_AND_CONTINUE_OBJECTIVE` | Default `--objective` |
-| `CHECKPOINT_AND_CONTINUE_NEXT_STEP` | Legacy input-only default for canonical `--next-action`; `--next-step` is also input-only |
-| `CHECKPOINT_AND_CONTINUE_GOAL_OBJECTIVE` | Goal text for goal-mode handoffs |
-| `CHECKPOINT_AND_CONTINUE_THRESHOLD` | Override the hook stub's experimental `0.30` trigger ratio |
+| `RELAY_OBJECTIVE` | Default `--objective` |
+| `RELAY_NEXT_STEP` | Legacy input-only default for canonical `--next-action`; `--next-step` is also input-only |
+| `RELAY_GOAL_OBJECTIVE` | Goal text for goal-mode handoffs |
+| `RELAY_THRESHOLD` | Override the hook stub's experimental `0.30` trigger ratio |
 
 Critical resume state should be passed explicitly or seeded in the session's `.active-task.json`; those three environment variables do not make an incomplete kernel ready.
 
@@ -50,7 +50,7 @@ The mandatory continuation block contains the exact capsule path, source session
 For session `S`, the implementation hashes the session identifier and stores:
 
 ```text
-.omx/state/checkpoint-and-continue/
+.omx/state/relay/
 |-- .latest.json
 |-- .ownership.json
 |-- .transfer.lock
@@ -112,9 +112,9 @@ Without `--official-hook-event`, `context_handoff.py` emits orchestration JSON. 
   "should_handoff": true,
   "checkpoint_written": true,
   "revision_created": true,
-  "capsule_path": "/abs/repo/.omx/state/checkpoint-and-continue/sessions/<scope>/<stamp>-r2-handoff.md",
+  "capsule_path": "/abs/repo/.omx/state/relay/sessions/<scope>/<stamp>-r2-handoff.md",
   "capsule_sha256": "<sha256>",
-  "continuation_prompt": "Use $checkpoint-and-continue. Continue from ...",
+  "continuation_prompt": "Use $relay. Continue from ...",
   "context_used_ratio": 0.31,
   "handoff_trigger_ratio": 0.3,
   "session_id": "<session-id>",
@@ -166,17 +166,17 @@ The plugin uses the documented default `hooks/hooks.json`, so `.codex-plugin/plu
 Compatibility installation creates:
 
 ```text
-scripts/workflow/checkpoint_and_continue_hook.sh
+scripts/workflow/relay_hook.sh
 ```
 
 Example project configuration:
 
 ```toml
 [hooks]
-PreToolUse = ["bash scripts/workflow/checkpoint_and_continue_hook.sh PreToolUse"]
-PreCompact = ["bash scripts/workflow/checkpoint_and_continue_hook.sh PreCompact"]
-Stop = ["bash scripts/workflow/checkpoint_and_continue_hook.sh Stop"]
-UserPromptSubmit = ["bash scripts/workflow/checkpoint_and_continue_hook.sh UserPromptSubmit"]
+PreToolUse = ["bash scripts/workflow/relay_hook.sh PreToolUse"]
+PreCompact = ["bash scripts/workflow/relay_hook.sh PreCompact"]
+Stop = ["bash scripts/workflow/relay_hook.sh Stop"]
+UserPromptSubmit = ["bash scripts/workflow/relay_hook.sh UserPromptSubmit"]
 ```
 
 The stub reads one hook JSON object from stdin, calls the installed orchestrator, and writes only the allowed official response.

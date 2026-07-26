@@ -30,13 +30,13 @@ Target paths may contain spaces. The installer creates:
 
 | Path | Purpose |
 | --- | --- |
-| `.agents/skills/checkpoint-and-continue/` | Generated canonical skill copy |
-| `scripts/workflow/checkpoint_and_continue_hook.sh` | Generated Codex CLI/OMX adapter |
-| `.omx/state/checkpoint-and-continue/` | Untracked, session-scoped runtime state as needed |
+| `.agents/skills/relay/` | Generated canonical skill copy |
+| `scripts/workflow/relay_hook.sh` | Generated Codex CLI/OMX adapter |
+| `.omx/state/relay/` | Untracked, session-scoped runtime state as needed |
 
-Canonical source remains `skills/checkpoint-and-continue/`; generated `.agents` and workflow copies should be repaired by reinstalling, not edited independently. The complete skill copy includes the V2/V3 telemetry reporters and their tests; installation adds no telemetry dependency.
+Canonical source remains `skills/relay/`; generated `.agents` and workflow copies should be repaired by reinstalling, not edited independently. The complete skill copy includes the V2/V3 telemetry reporters and their tests; installation adds no telemetry dependency.
 
-After installation, seed a complete critical kernel using [the ready-session example](../skills/checkpoint-and-continue/examples.md#seed-a-ready-session). A partial objective/next-action seed will correctly remain non-ready.
+After installation, seed a complete critical kernel using [the ready-session example](../skills/relay/examples.md#seed-a-ready-session). A partial objective/next-action seed will correctly remain non-ready.
 
 ## Review And Trust Hooks
 
@@ -55,9 +55,9 @@ Release evidence in `artifacts/metrics/live-hooks-trust.json` is valid only for 
 
 An unavailable live `/hooks` check is a release-blocking validation gap, not a silent pass.
 
-## Upgrade From `session-continuity`
+## Upgrade From Legacy Skills
 
-The installer treats `.agents/skills/session-continuity` and `.omx/state/session-continuity` as legacy state:
+The installer treats `.agents/skills/session-continuity`, `.agents/skills/checkpoint-and-continue`, and their matching `.omx/state/*` trees as legacy state:
 
 - the active legacy skill, including its writer, is moved to `.agents/archived-skills/`, outside the active namespace
 - the legacy runtime tree is left byte-identical
@@ -69,9 +69,9 @@ The installer treats `.agents/skills/session-continuity` and `.omx/state/session
 - failure at any transaction step restores the prior canonical skill, hook, imported state, and active legacy skill
 - repeated install is locked and idempotent; after success, only the canonical writer remains active and enforces the 4096-byte capsule and 1024-byte prompt budgets
 
-`audit_install.sh` fails while `.agents/skills/session-continuity` remains active.
+`audit_install.sh` fails while `.agents/skills/session-continuity` or `.agents/skills/checkpoint-and-continue` remains active.
 
-Older releases also created an unsupported editor hook. The installer removes the generated hook file; if user-owned `.cursor/hooks.json` still references `checkpoint-and-continue-gate.mjs`, remove that stale entry separately.
+Older releases also created an unsupported editor hook. The installer removes the generated hook file; if user-owned `.cursor/hooks.json` still references `relay-gate.mjs`, remove that stale entry separately.
 
 ## Repair And Re-Audit
 
@@ -104,9 +104,9 @@ This proves portable install and repair behavior, including installed V2/V3 tele
 After preserving any required runtime evidence:
 
 ```bash
-rm -rf .agents/skills/checkpoint-and-continue
-rm -f scripts/workflow/checkpoint_and_continue_hook.sh
-rm -rf .omx/state/checkpoint-and-continue
+rm -rf .agents/skills/relay
+rm -f scripts/workflow/relay_hook.sh
+rm -rf .omx/state/relay
 ```
 
 Uninstall does not delete archived legacy skill copies or the untouched `.omx/state/session-continuity` source.

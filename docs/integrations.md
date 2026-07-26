@@ -54,14 +54,14 @@ Installation and static validation alone do not prove load/trust.
 
 ## Codex CLI / OMX Compatibility Install
 
-`install.sh` creates `scripts/workflow/checkpoint_and_continue_hook.sh`, which calls the installed canonical runtime. Example project configuration:
+`install.sh` creates `scripts/workflow/relay_hook.sh`, which calls the installed canonical runtime. Example project configuration:
 
 ```toml
 [hooks]
-PreToolUse = ["bash scripts/workflow/checkpoint_and_continue_hook.sh PreToolUse"]
-PreCompact = ["bash scripts/workflow/checkpoint_and_continue_hook.sh PreCompact"]
-Stop = ["bash scripts/workflow/checkpoint_and_continue_hook.sh Stop"]
-UserPromptSubmit = ["bash scripts/workflow/checkpoint_and_continue_hook.sh UserPromptSubmit"]
+PreToolUse = ["bash scripts/workflow/relay_hook.sh PreToolUse"]
+PreCompact = ["bash scripts/workflow/relay_hook.sh PreCompact"]
+Stop = ["bash scripts/workflow/relay_hook.sh Stop"]
+UserPromptSubmit = ["bash scripts/workflow/relay_hook.sh UserPromptSubmit"]
 ```
 
 The CLI adapter can checkpoint and emit allowed hook context. Automatic clean-task creation still requires a Codex agent surface with thread tools.

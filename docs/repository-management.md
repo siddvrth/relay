@@ -6,10 +6,10 @@ Fresh Handoff is managed as a focused runtime package, not as a project-specific
 
 | Surface | Source of truth | Notes |
 | --- | --- | --- |
-| Agent skill | `skills/checkpoint-and-continue/` | Edit here first, then run `install.sh .` |
+| Agent skill | `skills/relay/` | Edit here first, then run `install.sh .` |
 | Codex hook | `codex/` | Keep CLI/OMX shell behavior isolated here |
 | Installed runtime copy | `.agents/`, `scripts/workflow/` | Generated locally by install; audit must match source |
-| Docs | `README.md`, `docs/`, `skills/checkpoint-and-continue/*.md` | Keep overview, manuals, runtime protocol, and examples separate |
+| Docs | `README.md`, `docs/`, `skills/relay/*.md` | Keep overview, manuals, runtime protocol, and examples separate |
 | Evidence | `artifacts/` | Sanitized samples and metrics only |
 
 ## Branch And Change Hygiene

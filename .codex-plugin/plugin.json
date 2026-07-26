@@ -14,7 +14,8 @@
     "continuity",
     "checkpoint",
     "handoff",
-    "context"
+    "context",
+    "relay"
   ],
   "skills": "./skills/",
   "interface": {

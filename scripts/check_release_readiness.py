@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(
     0,
-    str(ROOT / "skills" / "checkpoint-and-continue" / "scripts"),
+    str(ROOT / "skills" / "relay" / "scripts"),
 )
 
 
@@ -28,9 +28,9 @@ RELEASE_POLICY_KEYS = {
     "cost_savings_claim",
 }
 LIVE_HOOK_ADAPTERS = (
-    "hooks/checkpoint_and_continue_hook.sh",
-    "codex/checkpoint_and_continue_hook.sh",
-    "scripts/workflow/checkpoint_and_continue_hook.sh",
+    "hooks/relay_hook.sh",
+    "codex/relay_hook.sh",
+    "scripts/workflow/relay_hook.sh",
 )
 # Lexical order is a frozen part of the framed digest contract, independent of
 # source-code grouping or future insert position.
@@ -38,18 +38,18 @@ RUNTIME_BINDING_PATHS = tuple(
     sorted(
         (
             ".codex-plugin/plugin.json",
-            "skills/checkpoint-and-continue/SKILL.md",
-            "skills/checkpoint-and-continue/reference.md",
-            "skills/checkpoint-and-continue/examples.md",
-            "skills/checkpoint-and-continue/agents/openai.yaml",
-            "skills/checkpoint-and-continue/scripts/write_handoff.py",
-            "skills/checkpoint-and-continue/scripts/context_handoff.py",
-            "skills/checkpoint-and-continue/scripts/transfer_control.py",
-            "skills/checkpoint-and-continue/scripts/goal_telemetry_report.py",
-            "skills/checkpoint-and-continue/scripts/goal_telemetry_v3.py",
-            "skills/checkpoint-and-continue/scripts/goal_telemetry_v3_contract.py",
-            "skills/checkpoint-and-continue/scripts/goal_telemetry_v3_report.py",
-            "skills/checkpoint-and-continue/scripts/goal_telemetry_v3_schema.py",
+            "skills/relay/SKILL.md",
+            "skills/relay/reference.md",
+            "skills/relay/examples.md",
+            "skills/relay/agents/openai.yaml",
+            "skills/relay/scripts/write_handoff.py",
+            "skills/relay/scripts/context_handoff.py",
+            "skills/relay/scripts/transfer_control.py",
+            "skills/relay/scripts/goal_telemetry_report.py",
+            "skills/relay/scripts/goal_telemetry_v3.py",
+            "skills/relay/scripts/goal_telemetry_v3_contract.py",
+            "skills/relay/scripts/goal_telemetry_v3_report.py",
+            "skills/relay/scripts/goal_telemetry_v3_schema.py",
             "scripts/check_release_readiness.py",
             "scripts/validate_distribution.py",
             "hooks/hooks.json",
@@ -868,11 +868,11 @@ def assess(root: Path = ROOT) -> dict[str, object]:
             if repository_name != manifest.get("name"):
                 blockers.append("repository name does not match plugin manifest name")
 
-    skill_path = root / "skills" / "checkpoint-and-continue" / "SKILL.md"
+    skill_path = root / "skills" / "relay" / "SKILL.md"
     if not skill_path.is_file():
-        blockers.append("checkpoint-and-continue skill source is missing")
-    elif "name: checkpoint-and-continue" not in skill_path.read_text(encoding="utf-8"):
-        blockers.append("skill frontmatter name is not checkpoint-and-continue")
+        blockers.append("relay skill source is missing")
+    elif "name: relay" not in skill_path.read_text(encoding="utf-8"):
+        blockers.append("skill frontmatter name is not relay")
 
     if manifest.get("name") != "fresh-handoff":
         blockers.append("public plugin name is not frozen as fresh-handoff")

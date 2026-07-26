@@ -9,7 +9,7 @@
   "capability_probes": [
     {
       "capability": "formal_v3_minimum_pair_count",
-      "command": "python3 -c \"import sys; sys.path.insert(0, 'skills/checkpoint-and-continue/scripts'); import goal_telemetry_report as g; print(g.MINIMUM_PAIRED_RUNS)\"",
+      "command": "python3 -c \"import sys; sys.path.insert(0, 'skills/relay/scripts'); import goal_telemetry_report as g; print(g.MINIMUM_PAIRED_RUNS)\"",
       "status": "executable",
       "result": "20",
       "limitation": "The frozen five-pair pilot is below the formal V3 minimum and cannot unlock an empirical claim."

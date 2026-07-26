@@ -14,12 +14,12 @@ Fresh Handoff documentation is organized by operator job:
 | [Artifact and privacy policy](artifacts.md) | You are deciding what can be committed |
 | [Validation and metrics](metrics.md) | You need proof commands or the current evidence baseline |
 
-The runtime skill protocol lives in [`../skills/checkpoint-and-continue/SKILL.md`](../skills/checkpoint-and-continue/SKILL.md). Low-level flags and JSON contracts live in [`../skills/checkpoint-and-continue/reference.md`](../skills/checkpoint-and-continue/reference.md). Copy-paste examples live in [`../skills/checkpoint-and-continue/examples.md`](../skills/checkpoint-and-continue/examples.md).
+The runtime skill protocol lives in [`../skills/relay/SKILL.md`](../skills/relay/SKILL.md). Low-level flags and JSON contracts live in [`../skills/relay/reference.md`](../skills/relay/reference.md). Copy-paste examples live in [`../skills/relay/examples.md`](../skills/relay/examples.md).
 
 ## Documentation Standard
 
 - Put user-facing setup and operations in `docs/`.
-- Put agent runtime instructions in `skills/checkpoint-and-continue/`.
+- Put agent runtime instructions in `skills/relay/`.
 - Put sanitized proof in `artifacts/`.
 - Keep README short enough to scan, but complete enough to orient a new operator.
 - Update validation evidence when behavior or test counts change.

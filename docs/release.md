@@ -5,9 +5,46 @@ Fresh Handoff remains experimental, but every public release must be reproducibl
 ## Frozen Identities
 
 - plugin and repository: `fresh-handoff`
-- bundled skill: `checkpoint-and-continue`
+- bundled skill: `relay`
 
 Do not rename these during routine contract or documentation work.
+
+## Deterministic Source Distribution
+
+`.codex-plugin/release-files.json` is the only release membership contract. Its
+sorted `paths` array is an exact allowlist, not a discovery rule. Every listed
+path must be a regular file in the selected Git commit.
+
+Build from a committed revision into an existing directory outside the source
+repository:
+
+```bash
+output_dir="$(mktemp -d)"
+commit="$(git rev-parse HEAD)"
+python3 scripts/build_release.py \
+  --repo . \
+  --commit "$commit" \
+  --output-dir "$output_dir"
+```
+
+The builder reads blobs from the selected Git tree, not from the working tree.
+It emits a normalized gzip-compressed USTAR archive and a canonical JSON
+manifest. The manifest binds the full source commit, Relay version, archive
+name, archive SHA-256 and size, and every payload path, mode, SHA-256, and size.
+Output names include the full source commit.
+
+The release includes only contract-listed public source, documentation,
+sanitized evidence, validation, installer, and runtime files. It excludes
+`.agents/`, `.omo/`, `.omx/`, Python caches, raw logs, temporary files, private
+evidence, environment files, and machine metadata. Contract validation rejects
+absolute, parent-relative, non-canonical, duplicated, unsorted, and
+machine-specific paths.
+
+Two builds from the same commit and contract are required to have identical
+archive and manifest bytes. Archive ownership, timestamps, member ordering,
+directory modes, file modes, and gzip metadata are normalized. The builder
+does not sign artifacts, establish source trust, or replace the independent
+release verifier and fresh-consumer proof required before a public release.
 
 ## Versioning
 
@@ -33,9 +70,11 @@ Use `0.x.y` while Codex hook and clean-task behavior are experimental.
 6. Run deterministic gates:
 
    ```bash
-   python3 skills/checkpoint-and-continue/scripts/test_write_handoff.py
-   python3 skills/checkpoint-and-continue/scripts/test_transfer_control.py
-   python3 skills/checkpoint-and-continue/scripts/test_transfer_integration.py
+   python3 skills/relay/scripts/test_write_handoff.py
+   python3 skills/relay/scripts/test_transfer_control.py
+   python3 skills/relay/scripts/test_transfer_integration.py
+   python3 scripts/test_release_contract.py
+   python3 scripts/test_build_release.py
    python3 scripts/test_release_readiness.py
    python3 scripts/validate_distribution.py
    bash validate.sh

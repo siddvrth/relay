@@ -36,7 +36,7 @@ except ImportError:  # pragma: no cover - the supported Codex runtimes are POSIX
     fcntl = None
 
 
-STATE_DIR_NAME = "checkpoint-and-continue"
+STATE_DIR_NAME = "relay"
 TRANSFER_VERSION = 1
 PHASES = (
     "prepared",
@@ -87,7 +87,7 @@ FAILURE_CODES = {
     "replayed_acknowledgement",
     "cross_session_acknowledgement",
 }
-FAULT_ENV = "CHECKPOINT_AND_CONTINUE_TRANSFER_FAULT"
+FAULT_ENV = "RELAY_TRANSFER_FAULT"
 
 
 class TransferError(RuntimeError):

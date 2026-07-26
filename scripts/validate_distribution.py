@@ -9,13 +9,15 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+from release_contract import validate_release_worktree
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / ".codex-plugin" / "plugin.json"
 HOOKS = ROOT / "hooks" / "hooks.json"
 RELEASE_POLICY = ROOT / ".codex-plugin" / "release-policy.json"
 SKILLS = ROOT / "skills"
-sys.path.insert(0, str(SKILLS / "checkpoint-and-continue" / "scripts"))
+sys.path.insert(0, str(SKILLS / "relay" / "scripts"))
 from goal_telemetry_report import (  # noqa: E402
     V2_SCHEMA_VERSION,
     V2_STUDY_TYPE,
@@ -191,6 +193,7 @@ def validate_goal_telemetry_artifacts(root: Path = ROOT) -> dict[str, int]:
 
 
 def validate() -> None:
+    validate_release_worktree(ROOT)
     manifest = load_json(MANIFEST)
     for key in ("name", "version", "description", "author", "skills", "interface"):
         if not manifest.get(key):

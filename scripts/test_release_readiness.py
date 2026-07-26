@@ -172,9 +172,9 @@ class ReleaseReadinessTests(unittest.TestCase):
             return hashlib.sha256(path.read_bytes()).hexdigest()
 
         adapters = (
-            "hooks/checkpoint_and_continue_hook.sh",
-            "codex/checkpoint_and_continue_hook.sh",
-            "scripts/workflow/checkpoint_and_continue_hook.sh",
+            "hooks/relay_hook.sh",
+            "codex/relay_hook.sh",
+            "scripts/workflow/relay_hook.sh",
         )
         manifest = json.loads(
             (root / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
@@ -242,7 +242,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         }
         for name, content in artifact_contents.items():
             (preregistration / name).write_bytes(content)
-        runtime = root / "skills" / "checkpoint-and-continue" / "scripts" / "write_handoff.py"
+        runtime = root / "skills" / "relay" / "scripts" / "write_handoff.py"
         runtime.write_text(
             runtime.read_text(encoding="utf-8") + "\n# candidate-runtime-fixture\n",
             encoding="utf-8",
@@ -418,7 +418,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             bindings[0]["release_runtime_sha256"],
         )
         self.assertIn(
-            "skills/checkpoint-and-continue/scripts/transfer_control.py",
+            "skills/relay/scripts/transfer_control.py",
             release.RUNTIME_BINDING_PATHS,
         )
 
@@ -437,10 +437,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             bindings[0]["release_runtime_sha256"],
         )
         for path in (
-            "skills/checkpoint-and-continue/scripts/goal_telemetry_v3.py",
-            "skills/checkpoint-and-continue/scripts/goal_telemetry_v3_contract.py",
-            "skills/checkpoint-and-continue/scripts/goal_telemetry_v3_report.py",
-            "skills/checkpoint-and-continue/scripts/goal_telemetry_v3_schema.py",
+            "skills/relay/scripts/goal_telemetry_v3.py",
+            "skills/relay/scripts/goal_telemetry_v3_contract.py",
+            "skills/relay/scripts/goal_telemetry_v3_report.py",
+            "skills/relay/scripts/goal_telemetry_v3_schema.py",
         ):
             self.assertIn(path, release.RUNTIME_BINDING_PATHS)
 
@@ -654,10 +654,10 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_git_binding_rejects_guidance_content_drift(self) -> None:
         guidance_paths = (
-            "skills/checkpoint-and-continue/SKILL.md",
-            "skills/checkpoint-and-continue/reference.md",
-            "skills/checkpoint-and-continue/examples.md",
-            "skills/checkpoint-and-continue/agents/openai.yaml",
+            "skills/relay/SKILL.md",
+            "skills/relay/reference.md",
+            "skills/relay/examples.md",
+            "skills/relay/agents/openai.yaml",
         )
         for guidance in guidance_paths:
             with self.subTest(guidance=guidance), tempfile.TemporaryDirectory() as temp:
@@ -680,10 +680,10 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_git_binding_rejects_guidance_mode_only_drift(self) -> None:
         guidance_paths = (
-            "skills/checkpoint-and-continue/SKILL.md",
-            "skills/checkpoint-and-continue/reference.md",
-            "skills/checkpoint-and-continue/examples.md",
-            "skills/checkpoint-and-continue/agents/openai.yaml",
+            "skills/relay/SKILL.md",
+            "skills/relay/reference.md",
+            "skills/relay/examples.md",
+            "skills/relay/agents/openai.yaml",
         )
         for guidance in guidance_paths:
             with self.subTest(guidance=guidance), tempfile.TemporaryDirectory() as temp:
@@ -776,8 +776,8 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_positive_claim_in_each_shipped_skill_markdown_surface_is_detected(self) -> None:
         for relative in (
-            "skills/checkpoint-and-continue/SKILL.md",
-            "skills/checkpoint-and-continue/reference.md",
+            "skills/relay/SKILL.md",
+            "skills/relay/reference.md",
         ):
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp) / "release"
@@ -838,7 +838,7 @@ class ReleaseReadinessTests(unittest.TestCase):
     def test_positive_claim_in_shipped_agent_yaml_is_detected_at_its_line(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            agent = root / "skills" / "checkpoint-and-continue" / "agents" / "openai.yaml"
+            agent = root / "skills" / "relay" / "agents" / "openai.yaml"
             agent.parent.mkdir(parents=True)
             agent.write_text(
                 "interface:\n"
@@ -850,7 +850,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             findings = release.scan_positive_public_claims(root)
 
         self.assertEqual(
-            ["skills/checkpoint-and-continue/agents/openai.yaml:3"],
+            ["skills/relay/agents/openai.yaml:3"],
             findings,
         )
 

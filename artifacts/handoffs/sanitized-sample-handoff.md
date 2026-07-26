@@ -62,9 +62,9 @@ Absent optional state: decisions, blockers
 
 ### Authoritative Files / Symbols
 
-- `skills/checkpoint-and-continue/SKILL.md`
-- `skills/checkpoint-and-continue/scripts/write_handoff.py::build_bounded_capsule`
-- `skills/checkpoint-and-continue/scripts/context_handoff.py::official_hook_response`
+- `skills/relay/SKILL.md`
+- `skills/relay/scripts/write_handoff.py::build_bounded_capsule`
+- `skills/relay/scripts/context_handoff.py::official_hook_response`
 
 ### Validation Evidence
 
@@ -87,7 +87,7 @@ Absent optional state: decisions, blockers
 
 ## Overflow Evidence
 
-path: <repo-root>/.omx/state/checkpoint-and-continue/sessions/<session-scope>/overflow/<sha256>.json
+path: <repo-root>/.omx/state/relay/sessions/<session-scope>/overflow/<sha256>.json
 sha256: <sha256>
 
 ## Notes

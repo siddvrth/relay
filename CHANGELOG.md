@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Renamed the bundled skill from `checkpoint-and-continue` to `relay` for shorter Codex `/` invocation and clearer branding.
+
 ## 0.3.0 - 2026-07-25
 
 - Added acknowledgement-gated single-writer transfer state with exact source/destination/goal/revision/SHA-256/nonce binding, replay-safe ownership publication, and truthful `termination_pending` fallback.
@@ -20,7 +22,7 @@
 ## 0.2.0 - 2026-07-12
 
 - Packaged the workflow as a canonical Codex plugin with bundled skill and lifecycle hooks.
-- Moved canonical skill source to `skills/checkpoint-and-continue/` and added distribution validation.
+- Moved canonical skill source to `skills/relay/` and added distribution validation.
 - Added path-with-spaces and plugin-hook portability smoke coverage.
 - Replaced inherited-history `fork_thread` handoffs with clean local project tasks created through `create_thread`.
 - Added an explicit `handoff_mode: clean_task` orchestration contract and regression coverage.
@@ -29,7 +31,7 @@
 - Added an exact paired sign test and machine-readable sanitized trial data.
 - Restricted the package to Codex App and Codex CLI/OMX.
 - Removed the Cursor hook, hook configuration, installer paths, lifecycle tests, Node requirement, and Cursor documentation.
-- Made the bundled test harness relocatable so it runs correctly from both portable source and `.agents/skills/checkpoint-and-continue` installs.
+- Made the bundled test harness relocatable so it runs correctly from both portable source and `.agents/skills/relay` installs.
 - Added a fresh-installed test-suite run to `validate.sh`; package-only artifact checks skip when portable source is not present.
 - Scoped cooldown and deduplication state per session so continuation generations do not suppress one another.
 - Made hook delivery one-shot across threshold, `stop`, `preCompact`, and manual checkpoint events.

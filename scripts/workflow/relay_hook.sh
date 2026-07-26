@@ -4,10 +4,10 @@
 set -euo pipefail
 
 ROOT="${ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-SCRIPT="$ROOT/.agents/skills/checkpoint-and-continue/scripts/context_handoff.py"
-TRANSFER_SCRIPT="$ROOT/.agents/skills/checkpoint-and-continue/scripts/transfer_control.py"
+SCRIPT="$ROOT/.agents/skills/relay/scripts/context_handoff.py"
+TRANSFER_SCRIPT="$ROOT/.agents/skills/relay/scripts/transfer_control.py"
 EVENT="${1:-UserPromptSubmit}"
-THRESHOLD="${CHECKPOINT_AND_CONTINUE_THRESHOLD:-0.30}"
+THRESHOLD="${RELAY_THRESHOLD:-0.30}"
 
 PAYLOAD="$(cat || true)"
 ARGS=(--repo "$ROOT" --stdin-json --handoff-threshold "$THRESHOLD")
@@ -51,7 +51,7 @@ emit_static_denial() {
 
 static_fallback() {
   local actor source scope source_scope state_root tombstone source_tombstone ownership owner_source owner_destination implicated pointer binding_found destination_actor tombstone_destination identity_fields actor_values source_values actor_count source_count durable_state candidate
-  state_root="$ROOT/.omx/state/checkpoint-and-continue"
+  state_root="$ROOT/.omx/state/relay"
   identity_fields="$(top_level_identity_fields)"
   actor_values="$(printf '%s\n' "$identity_fields" | awk -F '\t' '$1=="session_id" || $1=="sessionId" || $1=="conversation_id" || $1=="conversationId" || $1=="composer_id" || $1=="composerId" || $1=="thread_id" || $1=="threadId" {print $2}')"
   source_values="$(printf '%s\n' "$identity_fields" | awk -F '\t' '$1=="source_session_id" || $1=="sourceSessionId" {print $2}')"
@@ -159,14 +159,14 @@ case "$EVENT" in
 esac
 ARGS+=(--official-hook-event "$OFFICIAL_EVENT")
 
-if [[ -n "${CHECKPOINT_AND_CONTINUE_OBJECTIVE:-}" ]]; then
-  export CHECKPOINT_AND_CONTINUE_OBJECTIVE
+if [[ -n "${RELAY_OBJECTIVE:-}" ]]; then
+  export RELAY_OBJECTIVE
 fi
-if [[ -n "${CHECKPOINT_AND_CONTINUE_NEXT_STEP:-}" ]]; then
-  export CHECKPOINT_AND_CONTINUE_NEXT_STEP
+if [[ -n "${RELAY_NEXT_STEP:-}" ]]; then
+  export RELAY_NEXT_STEP
 fi
-if [[ -n "${CHECKPOINT_AND_CONTINUE_GOAL_OBJECTIVE:-}" ]]; then
-  export CHECKPOINT_AND_CONTINUE_GOAL_OBJECTIVE
+if [[ -n "${RELAY_GOAL_OBJECTIVE:-}" ]]; then
+  export RELAY_GOAL_OBJECTIVE
 fi
 
 if [[ ! -f "$SCRIPT" ]] || ! command -v python3 >/dev/null 2>&1; then

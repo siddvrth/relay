@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/checkpoint_and_continue_hook.sh UserPromptSubmit",
-            "statusMessage": "Checking checkpoint-and-continue threshold"
+            "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh UserPromptSubmit",
+            "statusMessage": "Checking relay threshold"
           }
         ]
       }
@@ -16,8 +16,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/checkpoint_and_continue_hook.sh PreToolUse",
-            "statusMessage": "Checking checkpoint-and-continue write authority"
+            "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh PreToolUse",
+            "statusMessage": "Checking relay write authority"
           }
         ]
       }
@@ -27,8 +27,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/checkpoint_and_continue_hook.sh PreCompact",
-            "statusMessage": "Writing checkpoint-and-continue checkpoint"
+            "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh PreCompact",
+            "statusMessage": "Writing relay checkpoint"
           }
         ]
       }
@@ -38,8 +38,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/checkpoint_and_continue_hook.sh Stop",
-            "statusMessage": "Preserving checkpoint-and-continue state"
+            "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh Stop",
+            "statusMessage": "Preserving relay state"
           }
         ]
       }

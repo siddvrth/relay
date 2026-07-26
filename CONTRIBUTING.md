@@ -32,7 +32,7 @@ bash completion_gate.sh .
 
 - README is the front door.
 - `docs/` contains user-facing manuals.
-- `skills/checkpoint-and-continue/` contains the runtime skill protocol, references, and scripts.
+- `skills/relay/` contains the runtime skill protocol, references, and scripts.
 - `artifacts/` contains sanitized evidence only.
 - `.github/` contains contribution intake and validation wiring.
 

@@ -21,9 +21,9 @@ REPO = SCRIPT_DIR.parents[2]
 WRITER = SCRIPT_DIR / "write_handoff.py"
 CONTEXT = SCRIPT_DIR / "context_handoff.py"
 TRANSFER = SCRIPT_DIR / "transfer_control.py"
-PLUGIN_HOOK = REPO / "hooks" / "checkpoint_and_continue_hook.sh"
-CODEX_HOOK = REPO / "codex" / "checkpoint_and_continue_hook.sh"
-WORKFLOW_HOOK = REPO / "scripts" / "workflow" / "checkpoint_and_continue_hook.sh"
+PLUGIN_HOOK = REPO / "hooks" / "relay_hook.sh"
+CODEX_HOOK = REPO / "codex" / "relay_hook.sh"
+WORKFLOW_HOOK = REPO / "scripts" / "workflow" / "relay_hook.sh"
 
 
 def load_module(name: str, path: Path):
@@ -697,7 +697,7 @@ class TransferIntegrationTests(unittest.TestCase):
     def test_core_fallback_allows_exact_bound_control_when_context_is_missing(self) -> None:
         transfer_id, _exact = self.bind_destination()
         plugin_root = self.repo / "core-only-plugin"
-        scripts = plugin_root / "skills" / "checkpoint-and-continue" / "scripts"
+        scripts = plugin_root / "skills" / "relay" / "scripts"
         scripts.mkdir(parents=True)
         installed_transfer = scripts / "transfer_control.py"
         shutil.copy2(TRANSFER, installed_transfer)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install checkpoint-and-continue into the parent git repo (or cwd).
+# Install relay into the parent git repo (or cwd).
 set -euo pipefail
 
 PKG="$(cd "$(dirname "$0")" && pwd)"
@@ -38,7 +38,7 @@ def require_within(path: Path) -> None:
 for relative in (
     ".agents",
     ".agents/skills",
-    ".agents/skills/checkpoint-and-continue",
+    ".agents/skills/relay",
     ".agents/archived-skills",
     "scripts",
     "scripts/workflow",
@@ -56,9 +56,9 @@ for relative in (
 
 for relative in (
     ".gitignore",
-    "scripts/workflow/checkpoint_and_continue_hook.sh",
-    ".cursor/hooks/checkpoint-and-continue-gate.mjs",
-    ".cursor/hooks/state/checkpoint-and-continue-gate.json",
+    "scripts/workflow/relay_hook.sh",
+    ".cursor/hooks/relay-gate.mjs",
+    ".cursor/hooks/state/relay-gate.json",
     ".cursor/hooks.json",
 ):
     path = repo / relative
@@ -68,7 +68,7 @@ for relative in (
         require_within(path)
 PY
 
-echo "Installing checkpoint-and-continue from $PKG into $REPO"
+echo "Installing relay from $PKG into $REPO"
 
 AGENTS_DIR_EXISTED=0
 AGENTS_SKILLS_DIR_EXISTED=0
@@ -80,8 +80,8 @@ WORKFLOW_DIR_EXISTED=0
 [[ -e "$REPO/scripts/workflow" || -L "$REPO/scripts/workflow" ]] && WORKFLOW_DIR_EXISTED=1
 mkdir -p "$REPO/.agents/skills" "$REPO/scripts/workflow"
 
-TARGET_SKILL="$REPO/.agents/skills/checkpoint-and-continue"
-TARGET_HOOK="$REPO/scripts/workflow/checkpoint_and_continue_hook.sh"
+TARGET_SKILL="$REPO/.agents/skills/relay"
+TARGET_HOOK="$REPO/scripts/workflow/relay_hook.sh"
 STAGE_ROOT=""
 INSTALL_COMMITTED=0
 
@@ -115,7 +115,7 @@ finish_install() {
 trap finish_install EXIT
 
 if [[ -e "$TARGET_SKILL" ]]; then
-  PROBE="$TARGET_SKILL/.checkpoint-and-continue-write-test"
+  PROBE="$TARGET_SKILL/.relay-write-test"
   if ! { : > "$PROBE" && rm -f "$PROBE"; } 2>/dev/null; then
     echo "Cannot update $TARGET_SKILL; directory is not writable in this environment." >&2
     echo "Run this installer from a shell with write access to the target .agents directory." >&2
@@ -123,21 +123,21 @@ if [[ -e "$TARGET_SKILL" ]]; then
   fi
 fi
 
-STAGE_ROOT="$(mktemp -d "$REPO/.agents/.checkpoint-and-continue-install.XXXXXX")"
+STAGE_ROOT="$(mktemp -d "$REPO/.agents/.relay-install.XXXXXX")"
 STAGED_SKILL="$STAGE_ROOT/new-skill"
 STAGED_HOOK="$STAGE_ROOT/new-hook"
 PREVIOUS_SKILL="$STAGE_ROOT/previous-skill"
 PREVIOUS_HOOK="$STAGE_ROOT/previous-hook"
 
 # Fully stage and verify both canonical surfaces before moving any live path.
-cp -R "$PKG/skills/checkpoint-and-continue" "$STAGED_SKILL"
+cp -R "$PKG/skills/relay" "$STAGED_SKILL"
 rm -f "$STAGED_SKILL/.DS_Store" "$STAGED_SKILL/scripts/.DS_Store"
 rm -rf "$STAGED_SKILL/scripts/__pycache__"
-cp "$PKG/codex/checkpoint_and_continue_hook.sh" "$STAGED_HOOK"
+cp "$PKG/codex/relay_hook.sh" "$STAGED_HOOK"
 chmod +x "$STAGED_HOOK"
 diff -qr -x __pycache__ -x '*.pyc' -x .DS_Store \
-  "$PKG/skills/checkpoint-and-continue" "$STAGED_SKILL" >/dev/null
-cmp -s "$PKG/codex/checkpoint_and_continue_hook.sh" "$STAGED_HOOK"
+  "$PKG/skills/relay" "$STAGED_SKILL" >/dev/null
+cmp -s "$PKG/codex/relay_hook.sh" "$STAGED_HOOK"
 PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile "$STAGED_SKILL/scripts/"*.py
 bash -n "$STAGED_HOOK"
 
@@ -174,7 +174,7 @@ def validate_transaction_paths() -> None:
     for relative in (
         ".agents",
         ".agents/skills",
-        ".agents/skills/checkpoint-and-continue",
+        ".agents/skills/relay",
         ".agents/archived-skills",
         "scripts",
         "scripts/workflow",
@@ -295,10 +295,29 @@ def remove_path(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
-def migration_stage(sessions_root: Path, final_dir: Path) -> Path | None:
-    source = newest_valid_legacy(repo / ".omx" / "state" / "session-continuity")
-    if source is None:
+LEGACY_STATE_NAMESPACES = ("session-continuity", "checkpoint-and-continue")
+LEGACY_SKILL_NAMES = ("session-continuity", "checkpoint-and-continue")
+
+
+def newest_valid_legacy_source() -> tuple[Path, str] | None:
+    best: tuple[int, str, str, Path] | None = None
+    for namespace in LEGACY_STATE_NAMESPACES:
+        source = newest_valid_legacy(repo / ".omx" / "state" / namespace)
+        if source is None:
+            continue
+        key = (source.stat().st_mtime_ns, source.name, str(source))
+        if best is None or key > best[:3]:
+            best = (*key, source, namespace)
+    if best is None:
         return None
+    return best[3], best[4]
+
+
+def migration_stage(sessions_root: Path, final_dir: Path) -> Path | None:
+    legacy = newest_valid_legacy_source()
+    if legacy is None:
+        return None
+    source, legacy_namespace = legacy
     source_sha256 = file_sha256(source)
     if migration_is_complete(final_dir, source, source_sha256):
         return None
@@ -314,7 +333,7 @@ def migration_stage(sessions_root: Path, final_dir: Path) -> Path | None:
             raise RuntimeError("legacy checkpoint checksum changed during copy")
         provenance = {
             "migration_version": 1,
-            "legacy_namespace": "session-continuity",
+            "legacy_namespace": legacy_namespace,
             "source": str(source),
             "source_sha256": source_sha256,
             "source_mtime_ns": source.stat().st_mtime_ns,
@@ -345,8 +364,8 @@ def unique_previous_import(sessions_root: Path, final_dir: Path) -> Path:
     return candidate
 
 
-def unique_legacy_archive(active: Path, archive_root: Path) -> Path:
-    candidate = archive_root / "session-continuity"
+def unique_legacy_archive(active: Path, archive_root: Path, skill_name: str) -> Path:
+    candidate = archive_root / skill_name
     if not candidate.exists() and not candidate.is_symlink():
         return candidate
     suffix = (
@@ -354,21 +373,21 @@ def unique_legacy_archive(active: Path, archive_root: Path) -> Path:
         if active.is_dir() and not active.is_symlink()
         else "legacy"
     )
-    candidate = archive_root / f"session-continuity-{suffix}"
+    candidate = archive_root / f"{skill_name}-{suffix}"
     counter = 1
     while candidate.exists() or candidate.is_symlink():
-        candidate = archive_root / f"session-continuity-{suffix}-{counter}"
+        candidate = archive_root / f"{skill_name}-{suffix}-{counter}"
         counter += 1
     return candidate
 
 
-lock_path = repo / ".omx" / "state" / ".checkpoint-and-continue-install.lock"
+lock_path = repo / ".omx" / "state" / ".relay-install.lock"
 validate_transaction_paths()
 lock_path.parent.mkdir(parents=True, exist_ok=True)
 with lock_path.open("a+", encoding="utf-8") as lock_handle:
     fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
     validate_transaction_paths()
-    canonical_root = repo / ".omx" / "state" / "checkpoint-and-continue"
+    canonical_root = repo / ".omx" / "state" / "relay"
     sessions_root = canonical_root / "sessions"
     canonical_root_existed = canonical_root.exists()
     sessions_root_existed = sessions_root.exists()
@@ -377,8 +396,7 @@ with lock_path.open("a+", encoding="utf-8") as lock_handle:
     temporary: Path | None = None
     previous_import: Path | None = None
     migration_published = False
-    active_legacy = repo / ".agents" / "skills" / "session-continuity"
-    archived_legacy: Path | None = None
+    archived_legacies: list[tuple[Path, Path]] = []
     archive_root = repo / ".agents" / "archived-skills"
     archive_root_existed = archive_root.exists() or archive_root.is_symlink()
     skill_previous = False
@@ -397,7 +415,7 @@ with lock_path.open("a+", encoding="utf-8") as lock_handle:
         if target_hook.exists() or target_hook.is_symlink():
             os.replace(target_hook, previous_hook)
             hook_previous = True
-        if os.environ.get("CHECKPOINT_AND_CONTINUE_INSTALL_FAULT") == "canonical_hook_swap":
+        if os.environ.get("RELAY_INSTALL_FAULT") == "canonical_hook_swap":
             raise RuntimeError("injected canonical hook swap failure")
         os.replace(staged_hook, target_hook)
         hook_installed = True
@@ -408,21 +426,26 @@ with lock_path.open("a+", encoding="utf-8") as lock_handle:
             if final_dir.exists() or final_dir.is_symlink():
                 previous_import = unique_previous_import(sessions_root, final_dir)
                 os.replace(final_dir, previous_import)
-            if os.environ.get("CHECKPOINT_AND_CONTINUE_INSTALL_FAULT") == "migration_publish":
+            if os.environ.get("RELAY_INSTALL_FAULT") == "migration_publish":
                 raise RuntimeError("injected migration publish failure")
             os.replace(temporary, final_dir)
             migration_published = True
 
-        if active_legacy.exists() or active_legacy.is_symlink():
-            archive_root.mkdir(parents=True, exist_ok=True)
-            archived_legacy = unique_legacy_archive(active_legacy, archive_root)
-            os.replace(active_legacy, archived_legacy)
+        for legacy_skill_name in LEGACY_SKILL_NAMES:
+            active_legacy = repo / ".agents" / "skills" / legacy_skill_name
+            if active_legacy.exists() or active_legacy.is_symlink():
+                archive_root.mkdir(parents=True, exist_ok=True)
+                archived_legacy = unique_legacy_archive(
+                    active_legacy, archive_root, legacy_skill_name
+                )
+                os.replace(active_legacy, archived_legacy)
+                archived_legacies.append((archived_legacy, active_legacy))
 
-        if os.environ.get("CHECKPOINT_AND_CONTINUE_INSTALL_FAULT") == "combined_finalize":
+        if os.environ.get("RELAY_INSTALL_FAULT") == "combined_finalize":
             raise RuntimeError("injected combined finalizer failure")
 
         fsync_path(sessions_root)
-        if archived_legacy is not None:
+        if archived_legacies:
             fsync_path(archive_root)
         if previous_import is not None and (
             previous_import.exists() or previous_import.is_symlink()
@@ -443,10 +466,14 @@ with lock_path.open("a+", encoding="utf-8") as lock_handle:
             except BaseException as error:
                 restore_errors.append(f"{label}: {error}")
 
-        if archived_legacy is not None and (
-            archived_legacy.exists() or archived_legacy.is_symlink()
-        ):
-            restore("legacy skill", lambda: os.replace(archived_legacy, active_legacy))
+        for archived_legacy, active_legacy in reversed(archived_legacies):
+            if archived_legacy.exists() or archived_legacy.is_symlink():
+                restore(
+                    f"legacy skill {active_legacy.name}",
+                    lambda archived=archived_legacy, active=active_legacy: os.replace(
+                        archived, active
+                    ),
+                )
         if migration_published and (final_dir.exists() or final_dir.is_symlink()):
             restore("published legacy import", lambda: remove_path(final_dir))
         if previous_import is not None and (
@@ -491,8 +518,8 @@ for path in \
   "$REPO/.cursor" \
   "$REPO/.cursor/hooks" \
   "$REPO/.cursor/hooks/state" \
-  "$REPO/.cursor/hooks/checkpoint-and-continue-gate.mjs" \
-  "$REPO/.cursor/hooks/state/checkpoint-and-continue-gate.json" \
+  "$REPO/.cursor/hooks/relay-gate.mjs" \
+  "$REPO/.cursor/hooks/state/relay-gate.json" \
   "$REPO/.cursor/hooks.json"; do
   if [[ -L "$path" ]]; then
     CURSOR_CLEANUP_SAFE=0
@@ -501,11 +528,11 @@ for path in \
   fi
 done
 if [[ "$CURSOR_CLEANUP_SAFE" -eq 1 ]]; then
-  rm -f "$REPO/.cursor/hooks/checkpoint-and-continue-gate.mjs" \
-    "$REPO/.cursor/hooks/state/checkpoint-and-continue-gate.json" \
+  rm -f "$REPO/.cursor/hooks/relay-gate.mjs" \
+    "$REPO/.cursor/hooks/state/relay-gate.json" \
     || echo "Warning: could not remove pre-Codex compatibility files" >&2
-  if grep -q 'checkpoint-and-continue-gate\.mjs' "$REPO/.cursor/hooks.json" 2>/dev/null; then
-    echo "Warning: remove legacy checkpoint-and-continue-gate.mjs entries from $REPO/.cursor/hooks.json" >&2
+  if grep -q 'relay-gate\.mjs' "$REPO/.cursor/hooks.json" 2>/dev/null; then
+    echo "Warning: remove legacy relay-gate.mjs entries from $REPO/.cursor/hooks.json" >&2
   fi
 fi
 

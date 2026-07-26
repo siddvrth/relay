@@ -3,11 +3,11 @@ set -euo pipefail
 
 PKG="$(cd "$(dirname "$0")" && pwd)"
 REPO="${1:-$(cd "$PKG/../.." && pwd)}"
-SKILL="$PKG/skills/checkpoint-and-continue/scripts"
+SKILL="$PKG/skills/relay/scripts"
 SMOKE_REPO="${TMPDIR:-/tmp}/checkpoint and continue smoke $$"
 
-echo "=== checkpoint-and-continue validate ==="
-PYCACHE="${TMPDIR:-/tmp}/checkpoint-and-continue-pycache-$$"
+echo "=== relay validate ==="
+PYCACHE="${TMPDIR:-/tmp}/relay-pycache-$$"
 trap 'rm -rf "$PYCACHE" "$SMOKE_REPO"' EXIT
 export PYTHONPYCACHEPREFIX="$PYCACHE"
 
@@ -68,6 +68,8 @@ for python_runtime in "${PYTHONS[@]}"; do
   "$python_runtime" -m py_compile "$SKILL"/*.py "$PKG/scripts"/*.py
 done
 python3 "$PKG/scripts/validate_distribution.py"
+python3 "$PKG/scripts/test_release_contract.py"
+python3 "$PKG/scripts/test_build_release.py"
 python3 "$PKG/scripts/test_release_readiness.py"
 python3 "$SKILL/test_transfer_control.py" -q
 python3 "$SKILL/test_transfer_integration.py" -q
@@ -80,14 +82,14 @@ bash "$PKG/install.sh" "$SMOKE_REPO" >/dev/null
 bash "$PKG/audit_install.sh" "$SMOKE_REPO" >/dev/null
 for python_runtime in "${PYTHONS[@]}"; do
   "$python_runtime" -m py_compile \
-    "$SMOKE_REPO/.agents/skills/checkpoint-and-continue/scripts/"*.py
+    "$SMOKE_REPO/.agents/skills/relay/scripts/"*.py
 done
-python3 "$SMOKE_REPO/.agents/skills/checkpoint-and-continue/scripts/test_write_handoff.py" >/dev/null
-python3 "$SMOKE_REPO/.agents/skills/checkpoint-and-continue/scripts/test_transfer_control.py" -q >/dev/null
-python3 "$SMOKE_REPO/.agents/skills/checkpoint-and-continue/scripts/test_transfer_hostile.py" -q >/dev/null
+python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_write_handoff.py" >/dev/null
+python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_transfer_control.py" -q >/dev/null
+python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_transfer_hostile.py" -q >/dev/null
 echo "fresh-install installed test suite: OK"
 for session_id in a b plugin-a plugin-b; do
-  python3 "$SMOKE_REPO/.agents/skills/checkpoint-and-continue/scripts/write_handoff.py" \
+  python3 "$SMOKE_REPO/.agents/skills/relay/scripts/write_handoff.py" \
     --repo "$SMOKE_REPO" \
     --session-id "$session_id" \
     --update-active-task-only \
@@ -98,7 +100,7 @@ for session_id in a b plugin-a plugin-b; do
     --completion-criteria "official hook response is valid" \
     --remaining-work "inspect smoke response" \
     --constraints "use the installed standard-library runtime" \
-    --authoritative-files "scripts/workflow/checkpoint_and_continue_hook.sh" \
+    --authoritative-files "scripts/workflow/relay_hook.sh" \
     --resume-validation-command "python3 -V" \
     --resume-validation-expected "exit 0" \
     --next-action "inspect the official hook response" >/dev/null
@@ -111,7 +113,7 @@ from pathlib import Path
 
 repo = Path(sys.argv[1])
 states = {}
-for path in (repo / ".omx/state/checkpoint-and-continue/sessions").glob("*/.active-task.json"):
+for path in (repo / ".omx/state/relay/sessions").glob("*/.active-task.json"):
     payload = json.loads(path.read_text(encoding="utf-8"))
     states[payload["session_id"]] = payload
 
@@ -130,12 +132,12 @@ for payload in states.values():
 PY
 echo "fresh-install canonical optional-state seed: OK"
 
-threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"a","context_usage_percent":31}' | bash scripts/workflow/checkpoint_and_continue_hook.sh UserPromptSubmit 2>/dev/null)"
-compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"b","context_usage_percent":1}' | bash scripts/workflow/checkpoint_and_continue_hook.sh PreCompact 2>/dev/null)"
-capsule_count="$(find "$SMOKE_REPO/.omx/state/checkpoint-and-continue" -name '*-handoff.md' -type f | wc -l | tr -d '[:space:]')"
+threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"a","context_usage_percent":31}' | bash scripts/workflow/relay_hook.sh UserPromptSubmit 2>/dev/null)"
+compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"b","context_usage_percent":1}' | bash scripts/workflow/relay_hook.sh PreCompact 2>/dev/null)"
+capsule_count="$(find "$SMOKE_REPO/.omx/state/relay" -name '*-handoff.md' -type f | wc -l | tr -d '[:space:]')"
 
-plugin_threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-a","context_usage_percent":31}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/checkpoint_and_continue_hook.sh" UserPromptSubmit 2>/dev/null)"
-plugin_compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-b","context_usage_percent":1}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/checkpoint_and_continue_hook.sh" PreCompact 2>/dev/null)"
+plugin_threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-a","context_usage_percent":31}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/relay_hook.sh" UserPromptSubmit 2>/dev/null)"
+plugin_compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-b","context_usage_percent":1}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/relay_hook.sh" PreCompact 2>/dev/null)"
 
 python3 - "$SMOKE_REPO" "$threshold" "$compact" "$plugin_threshold" "$plugin_compact" "$capsule_count" <<'PY'
 import json
@@ -153,7 +155,7 @@ official_keys = {
     "hookSpecificOutput",
 }
 states = {}
-for path in (repo / ".omx/state/checkpoint-and-continue/sessions").glob("*/.active-task.json"):
+for path in (repo / ".omx/state/relay/sessions").glob("*/.active-task.json"):
     payload = json.loads(path.read_text(encoding="utf-8"))
     states[payload["session_id"]] = payload
 
@@ -164,7 +166,7 @@ for session_id, payload in thresholds:
     prompt = specific["additionalContext"]
     pointer = next(
         candidate
-        for path in (repo / ".omx/state/checkpoint-and-continue/sessions").glob("*/.pointer.json")
+        for path in (repo / ".omx/state/relay/sessions").glob("*/.pointer.json")
         if (candidate := json.loads(path.read_text(encoding="utf-8")))["session_id"] == session_id
     )
     state = states[session_id]

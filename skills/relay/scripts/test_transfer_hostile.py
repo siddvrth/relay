@@ -23,11 +23,11 @@ TRANSFER_SCRIPT = SCRIPT_DIR / "transfer_control.py"
 WRITER_SCRIPT = SCRIPT_DIR / "write_handoff.py"
 INSTALL_SCRIPT = PACKAGE_ROOT / "install.sh"
 AUDIT_SCRIPT = PACKAGE_ROOT / "audit_install.sh"
-SOURCE_PLUGIN_HOOK = PACKAGE_ROOT / "hooks" / "checkpoint_and_continue_hook.sh"
+SOURCE_PLUGIN_HOOK = PACKAGE_ROOT / "hooks" / "relay_hook.sh"
 PLUGIN_HOOK = (
     SOURCE_PLUGIN_HOOK
     if SOURCE_PLUGIN_HOOK.is_file()
-    else RUNTIME_ROOT / "scripts/workflow/checkpoint_and_continue_hook.sh"
+    else RUNTIME_ROOT / "scripts/workflow/relay_hook.sh"
 )
 sys.path.insert(0, str(SCRIPT_DIR))
 import transfer_control  # noqa: E402
@@ -46,7 +46,7 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
         self.repo = Path(self.temporary.name)
         if PACKAGE_ROOT.name == ".agents":
             installed_skill = (
-                self.repo / ".agents/skills/checkpoint-and-continue"
+                self.repo / ".agents/skills/relay"
             )
             installed_skill.parent.mkdir(parents=True, exist_ok=True)
             installed_skill.symlink_to(SCRIPT_DIR.parent, target_is_directory=True)
@@ -245,7 +245,7 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             "--validation-status", validation,
             "--resume-validation-command", "python3 focused_test.py",
             "--resume-validation-expected", "exit 0 and 7 tests pass",
-            "--authoritative-files", "skills/checkpoint-and-continue/scripts/transfer_control.py",
+            "--authoritative-files", "skills/relay/scripts/transfer_control.py",
             "--next-step", next_action,
             "--goal-objective", objective,
         ]
@@ -1265,14 +1265,14 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             self.assertEqual(audit.returncode, 0, audit.stderr or audit.stdout)
             installed_script = (
                 installed_repo
-                / ".agents/skills/checkpoint-and-continue/scripts/transfer_control.py"
+                / ".agents/skills/relay/scripts/transfer_control.py"
             )
             installed_hook = (
-                installed_repo / "scripts/workflow/checkpoint_and_continue_hook.sh"
+                installed_repo / "scripts/workflow/relay_hook.sh"
             )
             self.assertEqual(TRANSFER_SCRIPT.read_bytes(), installed_script.read_bytes())
             self.assertEqual(
-                (PACKAGE_ROOT / "codex/checkpoint_and_continue_hook.sh").read_bytes(),
+                (PACKAGE_ROOT / "codex/relay_hook.sh").read_bytes(),
                 installed_hook.read_bytes(),
             )
 
@@ -1306,7 +1306,7 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
                 task = "parity-destination-task"
                 capsule = (
                     runtime_repo
-                    / ".omx/state/checkpoint-and-continue/sessions"
+                    / ".omx/state/relay/sessions"
                     / transfer_control.session_scope(source)
                     / "capsule.md"
                 )
@@ -1504,7 +1504,7 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
                         )
             self.assertFalse(writer_target.exists())
             self.assertEqual(list(nested.rglob("*.tmp")), [])
-            self.assertEqual(list(nested.rglob(".checkpoint-and-continue-install.*")), [])
+            self.assertEqual(list(nested.rglob(".relay-install.*")), [])
         self.assertFalse(nested_path.exists())
 
         if not INSTALL_SCRIPT.is_file():
@@ -1545,13 +1545,13 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             )
             self.assertNotEqual(staged_failure.returncode, 0)
             self.assertFalse(
-                (staging_repo / ".agents/skills/checkpoint-and-continue").exists()
+                (staging_repo / ".agents/skills/relay").exists()
             )
             self.assertFalse(
-                (staging_repo / "scripts/workflow/checkpoint_and_continue_hook.sh").exists()
+                (staging_repo / "scripts/workflow/relay_hook.sh").exists()
             )
             self.assertEqual(
-                list((staging_repo / ".agents").glob(".checkpoint-and-continue-install.*")),
+                list((staging_repo / ".agents").glob(".relay-install.*")),
                 [],
             )
 
@@ -1570,7 +1570,7 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             )
             before_failure = self._tree_snapshot(finalize_repo)
             finalize_env = os.environ.copy()
-            finalize_env["CHECKPOINT_AND_CONTINUE_INSTALL_FAULT"] = "combined_finalize"
+            finalize_env["RELAY_INSTALL_FAULT"] = "combined_finalize"
             finalized_failure = subprocess.run(
                 ["bash", str(INSTALL_SCRIPT), str(finalize_repo)],
                 text=True,
@@ -1582,7 +1582,7 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             self.assertEqual(before_failure, self._tree_snapshot(finalize_repo))
             self.assertEqual(list(finalize_repo.rglob("*.tmp")), [])
             self.assertEqual(
-                list((finalize_repo / ".agents").glob(".checkpoint-and-continue-install.*")),
+                list((finalize_repo / ".agents").glob(".relay-install.*")),
                 [],
             )
 
