@@ -1,6 +1,6 @@
 # Release Process
 
-Fresh Handoff remains experimental, but every public release must be reproducible and must separate static correctness from empirical efficiency claims.
+Relay remains experimental, but every public release must be reproducible and must separate static correctness from empirical efficiency claims.
 
 ## Frozen Identities
 

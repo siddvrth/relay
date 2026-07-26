@@ -49,6 +49,10 @@ emit_static_denial() {
   esac
 }
 
+emit_static_allow() {
+  if [[ "$OFFICIAL_EVENT" == "PreToolUse" ]]; then echo '{}'; else echo '{"continue":true}'; fi
+}
+
 static_fallback() {
   local actor source scope source_scope state_root tombstone source_tombstone ownership owner_source owner_destination implicated pointer binding_found destination_actor tombstone_destination identity_fields actor_values source_values actor_count source_count durable_state candidate
   state_root="$ROOT/.omx/state/relay"
@@ -63,7 +67,7 @@ static_fallback() {
   [[ -e "$state_root/.ownership.json" ]] && durable_state=true
   for candidate in "$state_root"/sessions/*/.active-transfer.json "$state_root"/sessions/*/.revoked.json "$state_root"/sessions/*/transfers/*.json; do [[ -e "$candidate" ]] && durable_state=true; done
   if [[ "$identity_fields" == *$'__INVALID__\t'* || "$actor_count" -ne 1 || "$source_count" -gt 1 || -z "$actor" || "$actor" == *'\'* || "$source" == *'\'* ]]; then
-    if [[ "$durable_state" == true ]]; then emit_static_denial; else echo '{"continue":true}'; fi
+    if [[ "$durable_state" == true ]]; then emit_static_denial; else emit_static_allow; fi
     return
   fi
   actor="${actor:-default}"
@@ -112,13 +116,13 @@ static_fallback() {
     if [[ "$actor" == "$owner_source" || "$actor" == "$owner_destination" ]]; then implicated=true; if [[ "$actor" == "$owner_destination" ]]; then destination_actor=true; else destination_actor=false; fi; fi
   fi
   if [[ "$implicated" != true ]]; then
-    echo '{"continue":true}'
+    emit_static_allow
     return
   fi
   case "$OFFICIAL_EVENT" in
     PreToolUse) echo '{"continue":true,"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"transfer runtime unavailable after durable revocation/ownership"}}' ;;
     UserPromptSubmit)
-      if [[ "$destination_actor" == true ]]; then echo '{"continue":true}'; else echo '{"continue":true,"decision":"block","reason":"transfer runtime unavailable after durable revocation/ownership"}'; fi
+      if [[ "$destination_actor" == true ]]; then emit_static_allow; else echo '{"continue":true,"decision":"block","reason":"transfer runtime unavailable after durable revocation/ownership"}'; fi
       ;;
     PreCompact|Stop) echo '{"continue":false,"stopReason":"transfer runtime unavailable after durable revocation/ownership"}' ;;
   esac
@@ -150,7 +154,7 @@ case "$EVENT" in
     ;;
   PreToolUse|pre-tool-use)
     OFFICIAL_EVENT="PreToolUse"
-    ARGS+=(--trigger manual --reason "OMX PreToolUse authority check")
+    ARGS+=(--trigger threshold --reason "OMX PreToolUse context and authority check")
     ;;
   *)
     OFFICIAL_EVENT="Stop"

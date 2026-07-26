@@ -719,7 +719,7 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
                     "tool_input": {"command": shlex.join(acknowledge_command)},
                 },
             )
-            self.assertEqual(allowed, {"continue": True})
+            self.assertEqual(allowed, {})
         ack_processes = [
             subprocess.Popen(
                 acknowledge_command,
@@ -771,7 +771,7 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
                         "tool_input": {"command": shlex.join(command)},
                     },
                 )
-                self.assertEqual(allowed, {"continue": True})
+                self.assertEqual(allowed, {})
                 completed = subprocess.run(
                     command,
                     text=True,

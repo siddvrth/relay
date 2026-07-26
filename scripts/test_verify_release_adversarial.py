@@ -31,9 +31,9 @@ class AdversarialReleaseVerifierTests(unittest.TestCase):
     def test_rejects_unsafe_archive_paths(self) -> None:
         unsafe = (
             "/absolute.txt",
-            "fresh-handoff-1.2.3/../escape.txt",
-            "fresh-handoff-1.2.3/./dot.txt",
-            "fresh-handoff-1.2.3\\backslash.txt",
+            "relay-1.2.3/../escape.txt",
+            "relay-1.2.3/./dot.txt",
+            "relay-1.2.3\\backslash.txt",
         )
         for name in unsafe:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
@@ -55,7 +55,7 @@ class AdversarialReleaseVerifierTests(unittest.TestCase):
     def test_rejects_symlinks_and_hardlinks(self) -> None:
         links = (
             (EntryKind.SYMLINK, "../../outside"),
-            (EntryKind.HARDLINK, "fresh-handoff-1.2.3/README.md"),
+            (EntryKind.HARDLINK, "relay-1.2.3/README.md"),
         )
         for kind, target in links:
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temp:
@@ -63,7 +63,7 @@ class AdversarialReleaseVerifierTests(unittest.TestCase):
                 entries = (
                     *read_entries(built.archive),
                     TarEntry(
-                        name=f"fresh-handoff-1.2.3/{kind.value}",
+                        name=f"relay-1.2.3/{kind.value}",
                         kind=kind,
                         mode=0o777,
                         linkname=target,
@@ -76,8 +76,8 @@ class AdversarialReleaseVerifierTests(unittest.TestCase):
 
     def test_rejects_duplicate_and_case_ambiguous_members(self) -> None:
         for label, duplicate in (
-            ("duplicate", "fresh-handoff-1.2.3/README.md"),
-            ("casefold", "fresh-handoff-1.2.3/readme.md"),
+            ("duplicate", "relay-1.2.3/README.md"),
+            ("casefold", "relay-1.2.3/readme.md"),
         ):
             with self.subTest(label=label), tempfile.TemporaryDirectory() as temp:
                 built = build_valid_artifacts(Path(temp))

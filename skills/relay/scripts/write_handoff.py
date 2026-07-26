@@ -545,7 +545,7 @@ def render_kernel(
     structural_failures: Sequence[str],
 ) -> str:
     sections = [
-        "# Fresh Handoff Capsule v2",
+        "# Relay Capsule v2",
         "",
         f"capsule_version: {CAPSULE_VERSION}",
         f"resume_ready: {'true' if resume_ready else 'false'}",
@@ -672,7 +672,7 @@ def _safe_overflow_capsule(
     budget: int,
 ) -> str:
     verbose = (
-        "# Fresh Handoff Capsule v2\n\n"
+        "# Relay Capsule v2\n\n"
         f"capsule_version: {CAPSULE_VERSION}\n"
         "resume_ready: false\n"
         f"session_id: {args.session_id}\n"
@@ -804,7 +804,7 @@ def build_continuation_prompt(
         f"Resume validation command: {resume_validation_command}.",
         f"Resume validation expected: {resume_validation_expected}.",
         "transfer_control.py: verify, then acknowledge.",
-        "Source authoritative/destination control-only until exact acknowledgement; destination sole writer after. Wait for status can_continue:true.",
+        "Source authoritative; destination control-only until exact acknowledgement, then sole writer. Wait for can_continue:true.",
     ]
     mandatory = "\n".join(mandatory_lines)
     mandatory_bytes = len(mandatory.encode("utf-8"))

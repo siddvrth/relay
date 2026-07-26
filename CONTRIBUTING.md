@@ -1,6 +1,6 @@
 # Contributing
 
-Fresh Handoff is small on purpose. Contributions should preserve that shape.
+Relay is small on purpose. Contributions should preserve that shape.
 
 ## Principles
 

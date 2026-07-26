@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh PreToolUse",
-            "statusMessage": "Checking relay write authority"
+            "statusMessage": "Checking Relay context and write authority"
           }
         ]
       }

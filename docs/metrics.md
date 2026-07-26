@@ -1,6 +1,6 @@
 # Validation And Metrics
 
-Fresh Handoff has two independent evidence lanes. Static validation proves the artifact contract; an empirical study is required to claim lower goal-token use. Passing one lane never implies passing the other.
+Relay has two independent evidence lanes. Static validation proves the artifact contract; an empirical study is required to claim lower goal-token use. Passing one lane never implies passing the other.
 
 ## Static Validation
 
@@ -118,6 +118,6 @@ Recheck current official rates before any sensitivity report. Never describe tho
 
 ## Experimental Timing Conditions
 
-The `0.30` used-context threshold is a host-dependent experimental generic default, not a payload budget. `0.50` and `0.70` are numeric overrides for the same comparison rule, not named strategies. No threshold is proven optimal. Official `UserPromptSubmit` does not document a context ratio, so missing telemetry cannot support a threshold claim and threshold mode does not trigger from absence or invalid data.
+The `0.30` used-context threshold is a conservative configurable safety margin, not a payload budget or a proven optimum for GPT-5.6 or Codex. It is motivated by published Qwen2.5-7B evidence of a 40–50% long-context degradation region ([arXiv:2601.15300](https://arxiv.org/abs/2601.15300)). `0.50` and `0.70` remain numeric overrides for diagnostic comparison. Automatic operation uses compatible telemetry or the latest trustworthy transcript current-input/effective-window pair and fails open on missing or changed schema.
 
 Compare identical multi-step tasks across the six frozen conditions: no proactive handoff, compatible `0.30`, compatible `0.50`, compatible `0.70`, `PreCompact`-only, and milestone. Manual milestone and `PreCompact` are deterministic; the three numeric conditions require compatible telemetry. Preserve failures and quality outcomes. Capsule/prompt budgets remain independent storage/transport controls and never select a timing condition.

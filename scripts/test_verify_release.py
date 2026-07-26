@@ -148,7 +148,7 @@ class ReleaseVerifierTests(unittest.TestCase):
             entries = (
                 *read_entries(built.archive),
                 TarEntry(
-                    name="fresh-handoff-1.2.3/private.txt",
+                    name="relay-1.2.3/private.txt",
                     kind=EntryKind.FILE,
                     mode=0o644,
                     payload=b"private\n",

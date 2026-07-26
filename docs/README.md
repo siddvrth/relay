@@ -1,6 +1,6 @@
 # Documentation
 
-Fresh Handoff documentation is organized by operator job:
+Relay documentation is organized by operator job:
 
 | Document | Use it when |
 | --- | --- |

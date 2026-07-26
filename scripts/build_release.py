@@ -91,7 +91,7 @@ def _version(plugin: bytes) -> str:
         document = json.loads(plugin)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ReleaseBuildError(reason=f"invalid {PLUGIN_PATH}: {error}") from error
-    if not isinstance(document, dict) or document.get("name") != "fresh-handoff":
+    if not isinstance(document, dict) or document.get("name") != "relay":
         raise ReleaseBuildError(reason=f"{PLUGIN_PATH} has invalid name")
     version = document.get("version")
     if not isinstance(version, str) or VERSION_PATTERN.fullmatch(version) is None:
@@ -164,12 +164,12 @@ def build_release(repo: Path, revision: str, output_dir: Path) -> tuple[Path, Pa
         raise ReleaseBuildError(reason=str(error)) from error
     blobs = {path: _blob(repository, tree, path) for path in contract.paths}
     version = _version(blobs[PLUGIN_PATH].payload)
-    stem = f"fresh-handoff-{version}-{commit}"
+    stem = f"relay-{version}-{commit}"
     archive_path = output / f"{stem}.tar.gz"
     manifest_path = output / f"{stem}.manifest.json"
     if archive_path.exists() or manifest_path.exists():
         raise ReleaseBuildError(reason="release output already exists")
-    archive = _archive(f"fresh-handoff-{version}", contract.paths, blobs)
+    archive = _archive(f"relay-{version}", contract.paths, blobs)
     files = [
         {
             "mode": "0755" if blobs[path].mode == "100755" else "0644",

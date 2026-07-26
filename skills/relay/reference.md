@@ -1,4 +1,4 @@
-# Fresh Handoff Reference
+# Relay Reference
 
 This is the low-level v2 contract for the `relay` skill. Start with the [project overview](../../README.md) and [installation guide](../../docs/installation.md).
 
@@ -98,7 +98,7 @@ Therefore one delivery per cooldown does not mean one revision per cooldown. A n
 
 Ratios accept `0.31`, `31`, or `31%`. Names ending in `Percent`, plus `context_usage_percent`, always use a `0..100` scale, so `1` means 1%.
 
-These fields are compatibility inputs, not a documented Codex guarantee. Current [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) says every command hook receives `session_id`; `UserPromptSubmit` additionally has `prompt`, but it does not document a context ratio. Missing telemetry cannot support a threshold claim: threshold mode stays inactive for missing or invalid ratios. Manual milestone and `PreCompact` triggers remain deterministic without ratio telemetry.
+These fields are compatibility inputs, not a documented Codex guarantee. When they are absent, `PreToolUse` reads only the final 256 KiB of the documented `transcript_path`, discards partial edge lines, and searches backward for the latest exact `event_msg/token_count` record. The numerator is `info.last_token_usage.input_tokens`; the denominator is the sibling `info.model_context_window`. Cumulative `total_token_usage` is never used. Missing, malformed, out-of-range, or changed schema fails open.
 
 The timing experiment compares exactly six conditions: no proactive handoff, `0.30`, `0.50`, `0.70`, `PreCompact`-only, and milestone. `0.30` is the experimental generic default; `0.50` and `0.70` are numeric overrides, and no threshold is proven optimal. The 4096/1024-byte budgets are independent storage/transport limits and do not alter trigger decisions.
 
@@ -153,11 +153,11 @@ The continuation prompt exists in this transport result only. Its mandatory bloc
 Internal JSON is not written directly to a hook's stdout. The adapters translate it by event:
 
 - `UserPromptSubmit`: common output fields plus `hookSpecificOutput.hookEventName="UserPromptSubmit"` and one `relay.codex_app.clean_task.v1` source launch envelope only when delivery is emitted; the envelope carries the bounded destination prompt unchanged; acknowledged/revoked sources are blocked
-- `PreToolUse`: exact transfer-control/read-only commands are allowed while pending; write-capable tools are denied for revoked sources and control-only destinations
-- `PreCompact`: common output fields only; a delivery-emitting checkpoint places the same source launch envelope in `systemMessage`, with no UserPromptSubmit-specific object
+- `PreToolUse`: a ready threshold result returns model-visible launch context; exact transfer-control/read-only commands remain allowed while write-capable tools are denied for revoked sources and control-only destinations
+- `PreCompact`: common output fields only; it reports checkpoint refresh and never claims automatic task launch
 - `Stop`: common output fields only; acknowledgement-gated stop state may force `continue:false`
 
-This matches the documented event-specific shapes in [Codex hooks](https://learn.chatgpt.com/docs/hooks). Extra internal metrics never leak into the official envelope. Hook errors fail open with `{"continue":true}`.
+This matches the documented event-specific shapes in [Codex hooks](https://learn.chatgpt.com/docs/hooks). Extra internal metrics never leak into the official envelope. `PreToolUse` emits `{}` when no event-specific output is required; hook errors fail open using each event's documented shape.
 
 The plugin uses the documented default `hooks/hooks.json`, so `.codex-plugin/plugin.json` does not need an explicit `hooks` field. Per [Codex plugin documentation](https://learn.chatgpt.com/docs/build-plugins), installing or enabling the plugin does not trust its non-managed hooks. Use `/hooks` to review and trust the current definitions; a changed hook hash requires review again.
 
@@ -205,7 +205,7 @@ Release binding resolves the declared control and candidate IDs as real commits,
 
 | Symptom | Likely cause | Corrective action |
 | --- | --- | --- |
-| No threshold handoff from documented `UserPromptSubmit` input | No documented context ratio is present | Use `PreCompact`, a manual checkpoint, or host-provided compatibility telemetry; do not claim exact 30% triggering |
+| No proactive threshold handoff | Compatible telemetry and the latest transcript usage are both unavailable or changed | Relay fails open; `PreCompact` remains the last-resort checkpoint |
 | `resume_ready:false` | Missing/invalid critical fields or critical byte overflow | Inspect `structural_guard` and any verified overflow path/hash; do not switch sessions |
 | Ready capsule but no prompt | Mandatory identity block exceeded the configured prompt budget | Inspect `prompt_guard`; shorten the locator/session or use a budget up to the 1024-byte hard ceiling before delivery |
 | New revision but no prompt | Session delivery cooldown is active, including after unchanged `PreCompact` | Resume only from an actually delivered exact prompt, or wait for a later eligible delivery |

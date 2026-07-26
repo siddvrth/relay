@@ -37,6 +37,7 @@ from write_handoff import (  # noqa: E402
     state_root,
     validate_structural_readiness,
 )
+from context_usage import extract_context_used, parse_ratio  # noqa: E402
 from transfer_control import (  # noqa: E402
     TransferError,
     authority_transaction,
@@ -44,6 +45,7 @@ from transfer_control import (  # noqa: E402
     guard_write,
     hook_pretool_decision,
     prepare as prepare_transfer,
+    status as transfer_status,
 )
 
 
@@ -52,26 +54,6 @@ DEFAULT_DEDUP_SECONDS = 300
 HANDOFF_MODE = "clean_task"
 WRITE_HANDOFF = Path(__file__).with_name("write_handoff.py")
 
-PERCENT_FIELD_NAMES = (
-    "context_usage_percent",
-    "contextUsagePercent",
-    "context_used_percent",
-    "contextUsedPercent",
-    "tokenUsagePercent",
-    "token_usage_percent",
-    "usagePercent",
-    "usage_percent",
-)
-RATIO_FIELD_NAMES = (
-    "contextUsed",
-    "context_used",
-    "contextUsage",
-    "context_usage",
-    "contextUsedRatio",
-    "context_used_ratio",
-    "usageRatio",
-    "usage_ratio",
-)
 SESSION_FIELD_NAMES = (
     "session_id",
     "sessionId",
@@ -213,77 +195,6 @@ def resolve_repo(path: str) -> Path:
     return candidate
 
 
-def _finite_ratio(value: float) -> float | None:
-    if not math.isfinite(value) or not 0 <= value <= 1:
-        return None
-    return value
-
-
-def parse_ratio(value: Any) -> float | None:
-    if value is None or isinstance(value, bool) or isinstance(value, (dict, list)):
-        return None
-    try:
-        text = str(value).strip().lower()
-        if not text or text in {"unknown", "n/a", "na"}:
-            return None
-        if text.endswith("%"):
-            parsed = float(text[:-1].strip()) / 100
-        else:
-            parsed = float(text)
-            parsed = parsed / 100 if parsed > 1 else parsed
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return _finite_ratio(parsed)
-
-
-def parse_percent(value: Any) -> float | None:
-    if value is None or isinstance(value, bool) or isinstance(value, (dict, list)):
-        return None
-    try:
-        text = str(value).strip().lower()
-        if text.endswith("%"):
-            text = text[:-1].strip()
-        parsed = float(text) / 100
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return _finite_ratio(parsed)
-
-
-def extract_context_used(payload: dict[str, Any]) -> float | None:
-    for key in PERCENT_FIELD_NAMES:
-        if key in payload:
-            ratio = parse_percent(payload[key])
-            if ratio is not None:
-                return ratio
-
-    for key in RATIO_FIELD_NAMES:
-        if key in payload:
-            ratio = parse_ratio(payload[key])
-            if ratio is not None:
-                return ratio
-
-    tokens = payload.get("context_tokens")
-    window = payload.get("context_window_size")
-    if tokens is not None and window is not None:
-        try:
-            tokens_f = float(tokens)
-            window_f = float(window)
-            if math.isfinite(tokens_f) and math.isfinite(window_f) and tokens_f >= 0 and window_f > 0:
-                ratio = _finite_ratio(tokens_f / window_f)
-                if ratio is not None:
-                    return ratio
-        except (TypeError, ValueError, OverflowError):
-            pass
-
-    for container_key in ("context", "telemetry", "usage", "metrics"):
-        container = payload.get(container_key)
-        if isinstance(container, dict):
-            ratio = extract_context_used(container)
-            if ratio is not None:
-                return ratio
-    return None
-
-
 def extract_handoff_key(payload: dict[str, Any]) -> str | None:
     for key in SESSION_FIELD_NAMES:
         value = payload.get(key)
@@ -384,9 +295,24 @@ def _resume_validation_value(
 
 
 def merge_state(args: argparse.Namespace, active: dict[str, Any]) -> dict[str, Any]:
+    objective = _text_value(args.objective, active, "objective")
+    goal_objective = _text_value(args.goal_objective, active, "goal_objective")
+    derived_goal_identity = derive_goal_identity("", goal_objective, objective)
+    explicit_goal_identity = args.goal_identity.strip()
+    stored_goal_identity = str(active.get("goal_identity", "")).strip()
+    stored_is_derived = stored_goal_identity.startswith(("goal:sha256:", "task:sha256:"))
+    goal_identity = (
+        explicit_goal_identity
+        or (
+            stored_goal_identity
+            if stored_goal_identity
+            and (not stored_is_derived or stored_goal_identity == derived_goal_identity)
+            else derived_goal_identity
+        )
+    )
     return {
         "session_id": args.session_id,
-        "objective": _text_value(args.objective, active, "objective"),
+        "objective": objective,
         "active_task": _text_value(args.active_task, active, "active_task"),
         "phase": _text_value(args.phase, active, "phase"),
         "status": _text_value(args.status, active, "status"),
@@ -416,8 +342,8 @@ def merge_state(args: argparse.Namespace, active: dict[str, Any]) -> dict[str, A
             ),
         },
         "next_action": _text_value(args.next_step, active, "next_action", "next_step"),
-        "goal_objective": _text_value(args.goal_objective, active, "goal_objective"),
-        "goal_identity": args.goal_identity,
+        "goal_objective": goal_objective,
+        "goal_identity": goal_identity,
     }
 
 
@@ -807,15 +733,27 @@ def official_hook_response(
     if event == "PreToolUse":
         repo_value = internal.get("_guard_repo")
         if isinstance(repo_value, str) and repo_value:
-            return hook_pretool_decision(Path(repo_value), payload or {})
-        if not denied:
-            return {"continue": True}
+            decision = hook_pretool_decision(Path(repo_value), payload or {})
+            specific = decision.get("hookSpecificOutput")
+            if isinstance(specific, dict):
+                return {"hookSpecificOutput": specific}
+            if denied:
+                return {}
+        elif denied:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                },
+            }
+        launch_context = codex_app_launch_context(internal)
+        if launch_context is None:
+            return {}
         return {
-            "continue": True,
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": reason,
+                "additionalContext": launch_context,
             },
         }
 
@@ -840,12 +778,6 @@ def official_hook_response(
         return {"continue": True}
 
     if event == "PreCompact":
-        launch_context = codex_app_launch_context(internal)
-        if launch_context is not None:
-            return {
-                "continue": True,
-                "systemMessage": launch_context,
-            }
         if internal.get("checkpoint_written"):
             return {
                 "continue": True,
@@ -921,13 +853,8 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
         or actor_session_id
     )
     args.source_session_id = source_session_id
-    args.goal_identity = derive_goal_identity(
-        args.goal_identity,
-        args.goal_objective,
-        args.objective,
-    )
-
     result = _empty_result(args, context_ratio)
+    result["_guard_repo"] = str(repo.resolve())
     guard = guard_write(
         repo,
         actor_session_id=actor_session_id,
@@ -947,6 +874,23 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
         threshold=args.handoff_threshold,
         force=args.force_handoff,
     ):
+        return result
+    current_transfer = transfer_status(
+        repo,
+        source_session_id=source_session_id,
+    )
+    current_phase = current_transfer.get("phase")
+    if args.official_hook_event and current_phase in {
+        "prepared",
+        "launch_requested",
+        "delivered",
+        "clean_session_started",
+        "verified",
+    }:
+        identity = current_transfer.get("transfer")
+        if isinstance(identity, dict):
+            result["transfer_id"] = identity.get("transfer_id")
+        result["skip_reason"] = f"transfer already in flight ({current_phase})"
         return result
 
     paths = state_paths(repo, args.session_id)
@@ -1344,28 +1288,17 @@ def main() -> int:
         print(json.dumps(error, indent=2))
         return 2
 
-    if args.official_hook_event == "PreToolUse":
-        try:
-            internal = guard_only(repo, args, payload)
-        except Exception as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
-        print(
-            json.dumps(
-                official_hook_response("PreToolUse", internal, payload),
-                indent=2,
-                ensure_ascii=False,
-            )
-        )
-        return 0
-
     budget_error = byte_budget_limit_error(
         args.capsule_budget_bytes,
         args.prompt_budget_bytes,
     )
     if budget_error:
         if args.official_hook_event:
-            print(json.dumps({"continue": True}))
+            print(
+                json.dumps(
+                    {} if args.official_hook_event == "PreToolUse" else {"continue": True}
+                )
+            )
             return 0
         error = {
             "should_handoff": False,
@@ -1403,7 +1336,11 @@ def main() -> int:
             except Exception:
                 print(str(exc), file=sys.stderr)
                 return 1
-            print(json.dumps({"continue": True}))
+            print(
+                json.dumps(
+                    {} if args.official_hook_event == "PreToolUse" else {"continue": True}
+                )
+            )
             return 0
         print(json.dumps(internal, indent=2))
         return 1

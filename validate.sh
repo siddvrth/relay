@@ -70,6 +70,7 @@ done
 python3 "$PKG/scripts/validate_distribution.py"
 python3 "$PKG/scripts/test_release_contract.py"
 python3 "$PKG/scripts/test_build_release.py"
+python3 "$PKG/scripts/test_extract_release.py"
 python3 "$PKG/scripts/test_verify_release.py"
 python3 "$PKG/scripts/test_verify_release_adversarial.py"
 python3 "$PKG/scripts/test_verify_release_identity.py"
@@ -78,7 +79,11 @@ python3 "$SKILL/test_transfer_control.py" -q
 python3 "$SKILL/test_transfer_integration.py" -q
 python3 "$SKILL/test_transfer_hostile.py" -q
 python3 "$SKILL/test_codex_app_handoff.py" -q
+python3 "$SKILL/test_context_usage.py" -q
 python3 "$SKILL/test_write_handoff.py"
+if [[ "${RELAY_SKIP_RELEASE_CONSUMER:-0}" != "1" ]]; then
+  python3 "$PKG/scripts/test_release_consumer.py" -q
+fi
 
 # Smoke from a fresh installed repo so validation cannot pass because of a stale host .agents copy.
 mkdir -p "$SMOKE_REPO"
@@ -91,6 +96,8 @@ done
 python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_write_handoff.py" >/dev/null
 python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_transfer_control.py" -q >/dev/null
 python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_transfer_hostile.py" -q >/dev/null
+python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_codex_app_handoff.py" -q >/dev/null
+python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_context_usage.py" -q >/dev/null
 echo "fresh-install installed test suite: OK"
 for session_id in a b plugin-a plugin-b; do
   python3 "$SMOKE_REPO/.agents/skills/relay/scripts/write_handoff.py" \

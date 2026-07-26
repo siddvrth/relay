@@ -1,12 +1,12 @@
 # Architecture
 
-Fresh Handoff has four layers: plugin distribution, canonical portable source, compatibility-installed surfaces, and session-scoped runtime state.
+Relay has four layers: plugin distribution, canonical portable source, compatibility-installed surfaces, and session-scoped runtime state.
 
 ## Source And Installed Surfaces
 
 | Path | Responsibility |
 | --- | --- |
-| `.codex-plugin/plugin.json` | Frozen `fresh-handoff` identity and install metadata |
+| `.codex-plugin/plugin.json` | Relay identity and install metadata |
 | `.codex-plugin/release-policy.json` | Exact four-field experimental non-claim policy |
 | `hooks/` | Plugin-bundled lifecycle definitions and adapter |
 | `skills/relay/` | Canonical protocol, reference, examples, and Python runtime |
@@ -56,7 +56,7 @@ Prompt transport has its own guard. The mandatory prompt block contains exact pa
 ## State Flow
 
 1. A session seeds or refreshes its complete active-task state.
-2. A manual event, compatible threshold signal, or `PreCompact` calls the orchestrator.
+2. `PreToolUse` evaluates current host usage while preserving the authority guard; manual `/relay` uses the same clean-task path and `PreCompact` remains the checkpoint fallback.
 3. The orchestrator locks that session, computes a canonical state hash, and decides whether to create a revision.
 4. `write_handoff.py` applies structural guards and byte budgets, then writes a self-contained capsule atomically.
 5. Before pointer reuse, the orchestrator verifies session/scope/revision/readiness, path containment/file type, and actual SHA-256. Failure forces a new revision.
@@ -76,11 +76,12 @@ This separation prevents stale state while retaining one delivery per session co
 
 The internal orchestrator result includes capsule, readiness, revision, metrics, overflow, and delivery data. Official hook stdout is a separate translation:
 
-- a ready `UserPromptSubmit` returns common fields plus a `relay.codex_app.clean_task.v1` launch envelope in `hookSpecificOutput.additionalContext`
-- `PreToolUse` denies write-capable tools for revoked sources and control-only destinations while permitting exact canonical transfer control
-- a ready `PreCompact` returns the same App launch envelope in the common `systemMessage`; `Stop` uses common fields only
+- a ready `UserPromptSubmit` may return a `relay.codex_app.clean_task.v1` launch envelope when compatible telemetry is already present
+- a ready `PreToolUse` returns the same model-visible launch envelope while preserving its write-authority permission decision
+- `PreCompact` writes or refreshes a checkpoint and reports that fact through common output only; it does not claim task creation
+- `Stop` uses common fields only
 
-Official [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) documents `session_id` for all command hooks and `prompt` for `UserPromptSubmit`, but not a context ratio. The `0.30` trigger is therefore experimental and host-dependent; compatible extra telemetry may enable it, while `PreCompact` is the deterministic documented fallback.
+Official [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) documents `transcript_path` but warns that its JSONL format is unstable. Relay therefore accepts compatible telemetry first, then reads only the final 256 KiB of the transcript for the latest exact `event_msg/token_count` record. It uses `last_token_usage.input_tokens`, never cumulative spend, with the sibling effective model window and fails open on schema drift.
 
 V3 aggregate telemetry spans the source-before-handoff, handoff-generation, destination-resume, and completion-after-resume portions of one goal. Accounting does not reset at acknowledgement or session change. Static observability is derived from retained lifecycle events or sanitized study rows; rejected operations are never counted by modifying authoritative acknowledgement, stop, or ownership state.
 

@@ -1,4 +1,4 @@
-# Fresh Handoff Examples
+# Relay Examples
 
 These examples use a concrete session ID and the full critical kernel. Replace sample values with current facts; do not use placeholders such as `TBD`, `unknown`, or `none` in critical fields. Optional `completed_work`, `decisions`, `blockers`, and `validation_evidence` may be absent; the writer persists their known-empty arrays without filler.
 

@@ -49,6 +49,10 @@ emit_static_denial() {
   esac
 }
 
+emit_static_allow() {
+  if [[ "$OFFICIAL_EVENT" == "PreToolUse" ]]; then echo '{}'; else echo '{"continue":true}'; fi
+}
+
 static_fallback() {
   local actor source scope source_scope state_root tombstone source_tombstone ownership owner_source owner_destination implicated pointer binding_found destination_actor pointer_destination tombstone_destination identity_fields actor_values source_values actor_count source_count durable_state candidate
   state_root="$ROOT/.omx/state/relay"
@@ -65,7 +69,7 @@ static_fallback() {
     [[ -e "$candidate" ]] && durable_state=true
   done
   if [[ "$identity_fields" == *$'__INVALID__\t'* || "$actor_count" -ne 1 || "$source_count" -gt 1 || -z "$actor" || "$actor" == *'\'* || "$source" == *'\'* ]]; then
-    if [[ "$durable_state" == true ]]; then emit_static_denial; else echo '{"continue":true}'; fi
+    if [[ "$durable_state" == true ]]; then emit_static_denial; else emit_static_allow; fi
     return
   fi
   actor="${actor:-default}"
@@ -127,7 +131,7 @@ static_fallback() {
     fi
   fi
   if [[ "$implicated" != true ]]; then
-    echo '{"continue":true}'
+    emit_static_allow
     return
   fi
   case "$OFFICIAL_EVENT" in
@@ -136,7 +140,7 @@ static_fallback() {
       ;;
     UserPromptSubmit)
       if [[ "$destination_actor" == true ]]; then
-        echo '{"continue":true}'
+        emit_static_allow
       else
         echo '{"continue":true,"decision":"block","reason":"transfer runtime unavailable after durable revocation/ownership"}'
       fi
@@ -177,7 +181,7 @@ case "$EVENT" in
     ;;
   PreToolUse|pre-tool-use)
     OFFICIAL_EVENT="PreToolUse"
-    ARGS+=(--trigger manual --reason "Codex plugin PreToolUse authority check")
+    ARGS+=(--trigger threshold --reason "Codex plugin PreToolUse context and authority check")
     ;;
   *)
     OFFICIAL_EVENT="Stop"

@@ -7,7 +7,7 @@ description: Preserve quality across long Codex sessions with bounded, self-cont
 
 ## Purpose
 
-Create a session-scoped Fresh Handoff capsule that a clean Codex task can resume without a transcript or predecessor checkpoint. Each revision contains one self-contained kernel; earlier revisions may help compare changes but are never required for recovery.
+Create a session-scoped Relay capsule that a clean Codex task can resume without a transcript or predecessor checkpoint. Each revision contains one self-contained kernel; earlier revisions may help compare changes but are never required for recovery.
 
 Defaults are independent:
 
@@ -26,16 +26,17 @@ Byte limits are deterministic hard ceilings. The flags may select smaller limits
 | Always create a new task | Only when Codex App exposes thread tools; otherwise emit the exact capsule pointer and prompt. |
 | Transfer goal identity | Preserve the derived goal identity and objective text, then inspect live goal state before continuing or recreating it. |
 | Close or archive the source | Acknowledgement authorizes source stop work; quiescence and visible archive/closure are separate observed outcomes. |
-| Support other editor hosts | Not supported. Fresh Handoff is Codex-only. |
+| Support other editor hosts | Not supported. Relay is Codex-only. |
 
 ## Trigger Policy
 
-The `0.30` threshold is experimental and host-dependent. Official Codex `UserPromptSubmit` input documents `session_id` and `prompt`, but not a context-used ratio. Therefore:
+The configurable `0.30` threshold is a conservative safety margin, not a proven optimum for GPT-5.6 or Codex. It is motivated by published Qwen2.5-7B evidence of a 40–50% long-context degradation region. Therefore:
 
 1. If compatible ratio telemetry is present and is below `0.30`, do not threshold-handoff.
 2. If compatible ratio telemetry is present and reaches `0.30`, refresh the session revision and make it eligible for delivery.
-3. If the ratio is absent, do not claim that `UserPromptSubmit` performed an exact 30%-used trigger.
-4. On every `PreCompact`, advance the session revision even when durable state is unchanged. A recent delivery still suppresses a duplicate prompt.
+3. If compatible telemetry is absent, `PreToolUse` reads only the final 256 KiB of `transcript_path` and uses the latest `last_token_usage.input_tokens / model_context_window`.
+4. If the transcript is missing, malformed, partial, or schema-changed, fail open.
+5. On every `PreCompact`, advance the session revision even when durable state is unchanged, but do not claim that this fallback launches a task.
 5. A manual or explicitly forced checkpoint can run at any time.
 
 ## Required Resume Kernel
@@ -87,7 +88,7 @@ Capsule readiness and transport readiness are independent. The mandatory prompt 
      --next-action "Run the targeted test and fix the first failure"
    ```
 
-2. Refresh through `context_handoff.py` or a configured hook. Revision creation and prompt delivery are separate: every `PreCompact` advances the revision, while the recent-delivery cooldown suppresses duplicate transport.
+2. Refresh through `context_handoff.py` or a configured hook. `PreToolUse` is the proactive in-turn trigger; every `PreCompact` advances the revision as a last-resort checkpoint, while the recent-delivery cooldown suppresses duplicate transport.
 3. Continue only when the result has `resume_ready:true`, `prompt_guard.fits:true`, and an emitted prompt containing the exact capsule path, SHA-256, session, and revision.
 4. If a ready internal result or `relay.codex_app.clean_task.v1` hook envelope is present and Codex App exposes `create_thread`, execute that envelope immediately: record its existing `launch_requested` command, create exactly one clean task in the current saved project's local environment with `initial_prompt` unchanged, then bind the returned `threadId` through the existing `delivered` and `started` commands. If creation returns an unknown outcome, reconcile it and never retry blindly.
 5. The destination verifies the exact transfer ID, source, goal identity, revision, capsule SHA-256, nonce, live repo/goal state, `next_action`, and both exact `resume_validation` fields, then explicitly acknowledges.
@@ -158,4 +159,4 @@ python3 scripts/validate_distribution.py
 bash validate.sh
 ```
 
-Plugin installation is not proof that hooks will execute. Before release, use `/hooks` in Codex CLI to confirm the bundled definitions are loaded, reviewed, and trusted.
+Plugin installation is not proof that hooks will execute. Use `/hooks` in Codex CLI or the Codex App plugin-hook trust prompt to confirm the bundled definitions are loaded, reviewed, and trusted once.

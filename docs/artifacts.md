@@ -1,6 +1,6 @@
 # Artifact And Privacy Policy
 
-Fresh Handoff preserves only the minimum durable state needed for safe continuation. Runtime artifacts may expose objectives, file paths, validation results, and repository state, so they remain untracked unless deliberately sanitized.
+Relay preserves only the minimum durable state needed for safe continuation. Runtime artifacts may expose objectives, file paths, validation results, and repository state, so they remain untracked unless deliberately sanitized.
 
 ## Commit These
 

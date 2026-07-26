@@ -166,14 +166,14 @@ def _verify_plugin(payload: bytes, version: str) -> None:
         raise VerificationError(reason=f"embedded plugin manifest is malformed: {error}") from error
     if (
         not isinstance(document, dict)
-        or document.get("name") != "fresh-handoff"
+        or document.get("name") != "relay"
         or document.get("version") != version
     ):
         raise VerificationError(reason="embedded plugin identity does not match the release")
 
 
 def _verify_members(tar_payload: bytes, manifest: ReleaseManifest) -> VerifiedRelease:
-    root = f"fresh-handoff-{manifest.version}"
+    root = f"relay-{manifest.version}"
     paths = tuple(item.path for item in manifest.files)
     expected_names = (
         root,

@@ -2200,6 +2200,30 @@ class ContextHandoffTests(unittest.TestCase):
         self.assertEqual(exact, full)
         self.assertIsNone(too_small)
 
+    def test_live_sized_goal_prompt_fits_the_default_budget(self) -> None:
+        prompt = build_continuation_prompt(
+            Path(
+                "/Users/example/Documents/continuous-codex/.omx/state/relay/"
+                "sessions/392fc04f4114b8c3/20260726-030809-890000-r10-handoff.md"
+            ),
+            session_id="019f9d3f-5002-7ad0-b6a1-9ed67eb5c96a",
+            revision=10,
+            capsule_sha256="f" * 64,
+            goal_identity="goal:sha256:" + "e" * 64,
+            transfer_nonce="BASVlzsWqDC3pC5Sg6X32vZLjkTuDxVD",
+            transfer_id="r10-1da55d9f23cb851e",
+            next_action=(
+                "Verify the Relay capsule, restore the exact goal if absent, "
+                "acknowledge the source, request source stop, and report PASS "
+                "with source and destination task IDs."
+            ),
+            resume_validation_command="git status --short",
+            resume_validation_expected="exit 0",
+        )
+        self.assertIsInstance(prompt, str)
+        assert isinstance(prompt, str)
+        self.assertLessEqual(len(prompt.encode("utf-8")), 1024)
+
     def test_minimum_prompt_budget_blocks_delivery_without_invalidating_capsule(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

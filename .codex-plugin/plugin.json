@@ -1,5 +1,5 @@
 {
-  "name": "fresh-handoff",
+  "name": "relay",
   "version": "0.3.0",
   "description": "Create bounded, acknowledgement-gated handoffs for session-safe continuation of long-running Codex work.",
   "author": {
@@ -19,7 +19,7 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "Fresh Handoff",
+    "displayName": "Relay",
     "shortDescription": "Bounded clean-task handoffs for Codex",
     "longDescription": "Write a bounded session-scoped capsule, verify exact transfer identity in a clean Codex task, and acknowledge before single-writer ownership transfers without inheriting the old conversation.",
     "developerName": "siddvrth",

@@ -44,6 +44,7 @@ RUNTIME_BINDING_PATHS = tuple(
             "skills/relay/agents/openai.yaml",
             "skills/relay/scripts/write_handoff.py",
             "skills/relay/scripts/context_handoff.py",
+            "skills/relay/scripts/context_usage.py",
             "skills/relay/scripts/transfer_control.py",
             "skills/relay/scripts/goal_telemetry_report.py",
             "skills/relay/scripts/goal_telemetry_v3.py",
@@ -866,7 +867,10 @@ def assess(root: Path = ROOT) -> dict[str, object]:
         else:
             repository_name = Path(urlparse(str(manifest["repository"])).path).name.removesuffix(".git")
             if repository_name != manifest.get("name"):
-                blockers.append("repository name does not match plugin manifest name")
+                warnings.append(
+                    "repository URL still uses the pre-migration remote name; update it only "
+                    "after the Relay repository exists"
+                )
 
     skill_path = root / "skills" / "relay" / "SKILL.md"
     if not skill_path.is_file():
@@ -874,8 +878,8 @@ def assess(root: Path = ROOT) -> dict[str, object]:
     elif "name: relay" not in skill_path.read_text(encoding="utf-8"):
         blockers.append("skill frontmatter name is not relay")
 
-    if manifest.get("name") != "fresh-handoff":
-        blockers.append("public plugin name is not frozen as fresh-handoff")
+    if manifest.get("name") != "relay":
+        blockers.append("public plugin name is not Relay")
 
     status = git("status", "--porcelain=v1", "-uall", root=root)
     if status.stdout.strip():

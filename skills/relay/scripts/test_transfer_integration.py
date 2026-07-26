@@ -235,7 +235,21 @@ class TransferIntegrationTests(unittest.TestCase):
                 },
             },
         )
-        self.assertEqual(allowed, {"continue": True})
+        self.assertEqual(allowed, {})
+        for command in (
+            f"sed -n 1,160p {self.capsule}",
+            f"python3 {TRANSFER} --help",
+        ):
+            readonly = self.run_hook(
+                PLUGIN_HOOK,
+                "PreToolUse",
+                {
+                    "session_id": self.DESTINATION,
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                },
+            )
+            self.assertEqual(readonly, {})
         injected = self.run_hook(
             PLUGIN_HOOK,
             "PreToolUse",
@@ -259,6 +273,8 @@ class TransferIntegrationTests(unittest.TestCase):
             f"/tmp/python3 {TRANSFER} --repo {self.repo} status --source-session-id {self.SOURCE}",
             f"python3 {TRANSFER} --repo /tmp status --source-session-id {self.SOURCE}",
             f"python3 {TRANSFER} --repo {self.repo} status --source-session-id wrong-source",
+            f"sed -n 1,160p {self.repo / 'README.md'}",
+            f"python3 {self.repo / 'other.py'} --help",
         ):
             rejected = self.run_hook(
                 PLUGIN_HOOK,
@@ -278,13 +294,13 @@ class TransferIntegrationTests(unittest.TestCase):
             "PreToolUse",
             {"session_id": self.DESTINATION, "tool_name": "Read", "tool_input": {}},
         )
-        self.assertEqual(readonly, {"continue": True})
+        self.assertEqual(readonly, {})
         goal_read = self.run_hook(
             PLUGIN_HOOK,
             "PreToolUse",
             {"session_id": self.DESTINATION, "tool_name": "get_goal", "tool_input": {}},
         )
-        self.assertEqual(goal_read, {"continue": True})
+        self.assertEqual(goal_read, {})
         for tool_name in ("exec_command", "Bash", "shell"):
             for command in (
                 "pwd",
@@ -302,7 +318,7 @@ class TransferIntegrationTests(unittest.TestCase):
                         "tool_input": {"cmd": command, "workdir": str(self.repo)},
                     },
                 )
-                self.assertEqual(repo_read, {"continue": True})
+                self.assertEqual(repo_read, {})
         escaped_read = self.run_hook(
             PLUGIN_HOOK,
             "PreToolUse",
@@ -358,7 +374,7 @@ class TransferIntegrationTests(unittest.TestCase):
                 "tool_input": {"command": exact_acknowledge},
             },
         )
-        self.assertEqual(allowed_ack, {"continue": True})
+        self.assertEqual(allowed_ack, {})
         wrong_nonce = self.run_hook(
             PLUGIN_HOOK,
             "PreToolUse",
@@ -388,7 +404,7 @@ class TransferIntegrationTests(unittest.TestCase):
                     {"session_id": "unrelated-session", "tool_name": "apply_patch"},
                     plugin_root=plugin_root,
                 )
-                self.assertEqual(response, {"continue": True})
+                self.assertEqual(response, {})
 
     def test_static_fallback_uses_top_level_actor_not_nested_tool_identity(self) -> None:
         self.acknowledge()
@@ -427,7 +443,7 @@ class TransferIntegrationTests(unittest.TestCase):
                     unrelated_payload,
                     plugin_root=plugin_root,
                 )
-                self.assertEqual(allowed, {"continue": True})
+                self.assertEqual(allowed, {})
 
     def test_static_fallback_fails_closed_on_ambiguous_top_level_identity(self) -> None:
         self.acknowledge()
@@ -549,7 +565,7 @@ class TransferIntegrationTests(unittest.TestCase):
             {"session_id": "unrelated-session", "tool_name": "apply_patch"},
             plugin_root=missing_plugin,
         )
-        self.assertEqual(unrelated, {"continue": True})
+        self.assertEqual(unrelated, {})
 
         paths = transfer.transfer_paths(self.repo, self.SOURCE)
         paths.ownership.write_text("{corrupt", encoding="utf-8")
@@ -559,7 +575,7 @@ class TransferIntegrationTests(unittest.TestCase):
             {"session_id": "another-unrelated", "tool_name": "apply_patch"},
             plugin_root=missing_plugin,
         )
-        self.assertEqual(unrelated_corrupt, {"continue": True})
+        self.assertEqual(unrelated_corrupt, {})
 
     def test_static_fallback_both_blocks_after_tombstone_before_ownership(self) -> None:
         _transfer_id, exact = self.bind_destination()
@@ -713,7 +729,7 @@ class TransferIntegrationTests(unittest.TestCase):
             },
             plugin_root=plugin_root,
         )
-        self.assertEqual(pending_status, {"continue": True})
+        self.assertEqual(pending_status, {})
         transfer.acknowledge(self.repo, **_exact)
         request_stop = self.run_hook(
             PLUGIN_HOOK,
@@ -727,7 +743,7 @@ class TransferIntegrationTests(unittest.TestCase):
             },
             plugin_root=plugin_root,
         )
-        self.assertEqual(request_stop, {"continue": True})
+        self.assertEqual(request_stop, {})
         transfer.request_stop(
             self.repo,
             source_session_id=self.SOURCE,
@@ -746,7 +762,7 @@ class TransferIntegrationTests(unittest.TestCase):
             },
             plugin_root=plugin_root,
         )
-        self.assertEqual(pending_record, {"continue": True})
+        self.assertEqual(pending_record, {})
         unproven_success = self.run_hook(
             PLUGIN_HOOK,
             "PreToolUse",

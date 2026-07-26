@@ -1,6 +1,6 @@
 # Security
 
-Fresh Handoff writes local checkpoint artifacts. Treat those artifacts as sensitive until sanitized.
+Relay writes local checkpoint artifacts. Treat those artifacts as sensitive until sanitized.
 
 ## Supported Surface
 
@@ -36,7 +36,7 @@ The scripts do not intentionally read environment variables beyond documented re
 
 ## Security Model
 
-Fresh Handoff is a local workflow tool. It should not transmit checkpoint contents to external services. Host tools may display continuation prompts or route them to a new session, but this package treats generated capsules as local sensitive files until explicitly sanitized.
+Relay is a local workflow tool. It should not transmit checkpoint contents to external services. Host tools may display continuation prompts or route them to a new session, but this package treats generated capsules as local sensitive files until explicitly sanitized.
 
 Before a transfer crosses acknowledgement, malformed checkpoint input retains the documented fail-open behavior so it does not block ordinary host work. Once a valid source revocation tombstone or destination ownership record exists, authority ambiguity fails closed for the affected writer. `PreToolUse` and prompt blocking are defense-in-depth only; they are not an operating-system write ACL.
 

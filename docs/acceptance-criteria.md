@@ -22,15 +22,15 @@
 
 | Requirement | Required behavior | Evidence |
 | --- | --- | --- |
-| Host-dependent threshold | Compatible telemetry at or above `0.30` can trigger; absent ratio does not produce an exact 30%-used claim | Compatibility and missing-ratio tests |
+| Host-effective threshold | Compatible telemetry or the latest trustworthy transcript usage is divided by the associated effective model window; absent or changed schema fails open | Context-usage extraction and boundary tests |
 | Deterministic fallback | `PreCompact` follows the checkpoint path regardless of ratio | Hook lifecycle tests |
-| Event-specific output | A ready `UserPromptSubmit` adds one machine-readable App launch envelope in `additionalContext`; a ready `PreCompact` carries the same envelope in the common `systemMessage`; `PreToolUse` emits a permission decision and `Stop` emits common fields only | Official-envelope schema tests |
+| Event-specific output | A ready `PreToolUse` adds one model-visible App launch envelope while preserving permission decisions; `PreCompact` reports checkpoint status only | Official-envelope schema tests |
 | Internal/official separation | Internal metrics and orchestration fields do not leak into official stdout | Adapter tests |
 | Cross-surface parity | Canonical skill, plugin, CLI, and workflow adapters agree on normalized kernel/readiness/revision/delivery decisions | Parity tests |
 | Hook trust | `/hooks` evidence is <=24 hours old and binds loaded/trusted events to current plugin version, hook-manifest hash, and all three adapter hashes | Live Codex CLI evidence; static install is insufficient |
 | `PreToolUse` guard | All distributed hook surfaces include `PreToolUse`; revoked sources and control-only destinations deny writes while exact transfer control remains available | Manifest, wrapper, and installed-parity tests |
 
-The threshold remains experimental because current [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) does not document a context ratio on `UserPromptSubmit`.
+The configurable `0.30` default is a conservative margin motivated by Qwen2.5-7B evidence of a 40–50% degradation region, not a proven optimum for GPT-5.6 or Codex.
 
 ## Migration And Installation
 

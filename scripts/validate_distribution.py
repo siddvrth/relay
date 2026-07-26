@@ -204,8 +204,8 @@ def validate() -> None:
         fail("plugin version must be semver")
     if manifest["skills"] != "./skills/":
         fail("plugin skills path must be ./skills/")
-    if manifest["name"] != "fresh-handoff":
-        fail("plugin name must be fresh-handoff")
+    if manifest["name"] != "relay":
+        fail("plugin name must be relay")
     if manifest.get("repository") != "https://github.com/siddvrth/fresh-handoff":
         fail("plugin repository URL must match the planned fresh-handoff remote")
     if manifest.get("license") != "MIT":

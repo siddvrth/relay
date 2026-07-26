@@ -1,10 +1,10 @@
 # Handoff Lifecycle
 
-Fresh Handoff repeats five stages for each Codex session: seed, refresh, decide delivery, create a clean task, and resume.
+Relay repeats five stages for each Codex session: seed, refresh, decide delivery, create a clean task, and resume.
 
 ## 1. Seed A Complete Session Kernel
 
-Seed the current session before automatic hooks need it. Use the full command in [Fresh Handoff examples](../skills/relay/examples.md#seed-a-ready-session); objective and next action alone are intentionally insufficient.
+Seed the current session before automatic hooks need it. Use the full command in [Relay examples](../skills/relay/examples.md#seed-a-ready-session); objective and next action alone are intentionally insufficient.
 
 The session's active state must contain concrete values for:
 
@@ -21,9 +21,9 @@ This state is stored under the hashed session directory, not in a repo-global ac
 
 ## 2. Refresh A Revision
 
-A manual milestone, compatible threshold event, or `PreCompact` can invoke the orchestrator. Manual milestone and `PreCompact` are deterministic triggers that do not require ratio telemetry. Every ready revision is a self-contained capsule at or below 4096 UTF-8 bytes.
+A manual `/relay`, an automatic `PreToolUse` threshold event, or `PreCompact` can invoke the orchestrator. `PreCompact` is the deterministic last-resort checkpoint when proactive usage cannot be read. Every ready revision is a self-contained capsule at or below 4096 UTF-8 bytes.
 
-The experimental generic default `0.30` threshold applies only when the host provides compatible context-ratio telemetry. `0.50` and `0.70` are numeric overrides, not named strategies. Official `UserPromptSubmit` does not document that field, so missing telemetry cannot support a threshold claim and threshold mode remains inactive for missing or invalid ratios. No threshold is proven optimal.
+The configurable default `0.30` uses compatible hook telemetry when present; otherwise `PreToolUse` reads the latest trustworthy current-input/window pair from a bounded `transcript_path` tail. Missing or changed transcript schema fails open. The margin is motivated by Qwen2.5-7B 40–50% degradation evidence and is not proven optimal for GPT-5.6 or Codex.
 
 Timing experiments compare exactly six conditions: no proactive handoff, `0.30`, `0.50`, `0.70`, `PreCompact`-only, and milestone. The 4096-byte capsule and 1024-byte prompt budgets govern storage/transport fit independently; they do not change the trigger comparison.
 

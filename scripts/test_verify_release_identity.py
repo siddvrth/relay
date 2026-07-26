@@ -31,7 +31,7 @@ class ReleaseIdentityVerifierTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             built = build_valid_artifacts(Path(temp))
             entries = []
-            plugin_payload = b'{"name":"fresh-handoff","version":"9.9.9"}\n'
+            plugin_payload = b'{"name":"relay","version":"9.9.9"}\n'
             for entry in read_entries(built.archive):
                 payload = (
                     plugin_payload
@@ -97,7 +97,7 @@ class ReleaseIdentityVerifierTests(unittest.TestCase):
         cases = (
             (
                 ".codex-plugin/plugin.json",
-                b'{"name":"fresh-handoff","name":"fresh-handoff","version":"1.2.3"}\n',
+                b'{"name":"relay","name":"relay","version":"1.2.3"}\n',
             ),
             (
                 ".codex-plugin/release-files.json",

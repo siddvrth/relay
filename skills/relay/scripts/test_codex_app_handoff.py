@@ -140,7 +140,29 @@ class CodexAppHandoffTests(unittest.TestCase):
         self.assertEqual(envelope["destination_id_source"], "create_thread.threadId")
         self.assertEqual(envelope["source_stop_gate"], "destination_acknowledged")
 
-    def test_precompact_ready_handoff_requests_the_same_clean_app_task(self) -> None:
+    def test_pretool_ready_handoff_requests_one_clean_app_task(self) -> None:
+        # Given
+        internal = ready_result()
+
+        # When
+        response = context_handoff.official_hook_response("PreToolUse", internal)
+
+        # Then
+        self.assertNotIn("continue", response)
+        envelope = parse_launch_context(
+            response["hookSpecificOutput"]["additionalContext"],
+        )
+        self.assertEqual(
+            response["hookSpecificOutput"]["hookEventName"],
+            "PreToolUse",
+        )
+        self.assertEqual(envelope["app_action"], "create_thread")
+        self.assertEqual(
+            envelope["initial_prompt"],
+            internal["continuation_prompt"],
+        )
+
+    def test_precompact_ready_handoff_only_reports_checkpoint(self) -> None:
         # Given
         internal = ready_result()
 
@@ -148,11 +170,12 @@ class CodexAppHandoffTests(unittest.TestCase):
         response = context_handoff.official_hook_response("PreCompact", internal)
 
         # Then
-        envelope = parse_launch_context(response["systemMessage"])
-        self.assertEqual(envelope["app_action"], "create_thread")
         self.assertEqual(
-            envelope["initial_prompt"],
-            internal["continuation_prompt"],
+            response,
+            {
+                "continue": True,
+                "systemMessage": "Checkpoint-and-continue state refreshed before compaction.",
+            },
         )
 
     def test_checkpoint_without_delivery_does_not_request_an_app_task(self) -> None:

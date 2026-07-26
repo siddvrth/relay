@@ -1,6 +1,6 @@
 # Repository Management
 
-Fresh Handoff is managed as a focused runtime package, not as a project-specific export. Keep every file useful to someone installing the package into an unrelated repository.
+Relay is managed as a focused runtime package, not as a project-specific export. Keep every file useful to someone installing the package into an unrelated repository.
 
 ## Source Of Truth
 

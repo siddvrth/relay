@@ -41,7 +41,7 @@ def write_fixture(repo: Path) -> str:
     (repo / ".codex-plugin").mkdir()
     (repo / "bin").mkdir()
     (repo / ".codex-plugin/plugin.json").write_text(
-        '{"name":"fresh-handoff","version":"1.2.3"}\n',
+        '{"name":"relay","version":"1.2.3"}\n',
         encoding="utf-8",
     )
     (repo / ".codex-plugin/release-files.json").write_text(
@@ -102,12 +102,12 @@ class DeterministicBuildTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             archive, _ = artifacts(output)
             with tarfile.open(archive, "r:gz") as bundle:
-                member = bundle.extractfile("fresh-handoff-1.2.3/README.md")
+                member = bundle.extractfile("relay-1.2.3/README.md")
                 self.assertIsNotNone(member)
                 assert member is not None
                 self.assertEqual(member.read(), b"committed payload\n")
                 self.assertNotIn(
-                    "fresh-handoff-1.2.3/.agents/private.log",
+                    "relay-1.2.3/.agents/private.log",
                     bundle.getnames(),
                 )
             self.assertEqual(
@@ -193,10 +193,10 @@ class DeterministicBuildTests(unittest.TestCase):
             self.assertEqual(
                 [member.name for member in members],
                 [
-                    "fresh-handoff-1.2.3",
-                    "fresh-handoff-1.2.3/.codex-plugin",
-                    "fresh-handoff-1.2.3/bin",
-                    *[f"fresh-handoff-1.2.3/{path}" for path in PAYLOADS],
+                    "relay-1.2.3",
+                    "relay-1.2.3/.codex-plugin",
+                    "relay-1.2.3/bin",
+                    *[f"relay-1.2.3/{path}" for path in PAYLOADS],
                 ],
             )
             for member in members:
@@ -206,8 +206,8 @@ class DeterministicBuildTests(unittest.TestCase):
                 )
                 self.assertFalse(member.name.startswith("/"))
             modes = {member.name: member.mode for member in members if member.isfile()}
-            self.assertEqual(modes["fresh-handoff-1.2.3/bin/relay"], 0o755)
-            self.assertEqual(modes["fresh-handoff-1.2.3/README.md"], 0o644)
+            self.assertEqual(modes["relay-1.2.3/bin/relay"], 0o755)
+            self.assertEqual(modes["relay-1.2.3/README.md"], 0o644)
 
     def test_invalid_inputs_leave_no_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

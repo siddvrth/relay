@@ -329,7 +329,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             manifest.write_text(
                 json.dumps(
                     {
-                        "name": "fresh-handoff",
+                        "name": "relay",
                         "repository": "https://github.com/siddvrth/fresh-handoff",
                         "license": "MIT",
                     }
@@ -730,8 +730,8 @@ class ReleaseReadinessTests(unittest.TestCase):
                 ignore=shutil.ignore_patterns(".git", ".agents", ".omx", ".DS_Store", "__pycache__"),
             )
             (root / "README.md").write_text(
-                "# Fresh Handoff\n\nDo not claim token or cost improvement. "
-                "Fresh Handoff saves goal tokens and lowers costs.\n",
+                "# Relay\n\nDo not claim token or cost improvement. "
+                "Relay saves goal tokens and lowers costs.\n",
                 encoding="utf-8",
             )
             result = self.assess(root)
@@ -756,7 +756,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest["description"] = (
                 "Do not claim token or cost improvement. "
-                "Fresh Handoff saves goal tokens without sacrificing quality "
+                "Relay saves goal tokens without sacrificing quality "
                 "and lowers costs."
             )
             manifest_path.write_text(
@@ -791,7 +791,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 path = root / relative
                 path.write_text(
                     "Do not claim token or cost improvement.\n\n"
-                    "Fresh Handoff saves goal tokens and lowers costs.\n",
+                    "Relay saves goal tokens and lowers costs.\n",
                     encoding="utf-8",
                 )
                 result = self.assess(root)
@@ -812,8 +812,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "README.md").write_text(
-                "# Fresh Handoff\n\n"
-                "Fresh Handoff improves token efficiency while retaining quality.\n",
+                "# Relay\n\n"
+                "Relay improves token efficiency while retaining quality.\n",
                 encoding="utf-8",
             )
 
@@ -825,8 +825,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "README.md").write_text(
-                "# Fresh Handoff\n\n"
-                "Fresh Handoff reduces\n"
+                "# Relay\n\n"
+                "Relay reduces\n"
                 "goal tokens while retaining quality.\n",
                 encoding="utf-8",
             )
@@ -842,8 +842,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             agent.parent.mkdir(parents=True)
             agent.write_text(
                 "interface:\n"
-                "  display_name: Fresh Handoff\n"
-                "  description: Fresh Handoff improves token efficiency.\n",
+                "  display_name: Relay\n"
+                "  description: Relay improves token efficiency.\n",
                 encoding="utf-8",
             )
 
@@ -861,7 +861,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             workflow.parent.mkdir(parents=True)
             workflow.write_text(
                 "name: Validate\n"
-                "description: Fresh Handoff provides better token efficiency.\n",
+                "description: Relay provides better token efficiency.\n",
                 encoding="utf-8",
             )
 
@@ -871,12 +871,12 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_later_positive_claim_is_not_hidden_by_earlier_negation(self) -> None:
         claims = (
-            "Fresh Handoff does not lower costs and improves token efficiency.",
-            "Although Fresh Handoff does not lower costs, Fresh Handoff improves "
+            "Relay does not lower costs and improves token efficiency.",
+            "Although Relay does not lower costs, Relay improves "
             "token efficiency.",
-            "Although Fresh Handoff does not lower costs, Fresh Handoff is more "
+            "Although Relay does not lower costs, Relay is more "
             "token-efficient than the baseline.",
-            "Fresh Handoff does not lower costs while it improves token efficiency.",
+            "Relay does not lower costs while it improves token efficiency.",
         )
         for text in claims:
             with self.subTest(text=text):
@@ -884,7 +884,7 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_later_positive_claim_is_not_hidden_by_historical_failure(self) -> None:
         claims = (
-            "The historical study failed and Fresh Handoff improves token efficiency.",
+            "The historical study failed and Relay improves token efficiency.",
             "The historical pre-v2 study failed and the candidate reduces goal tokens.",
         )
         for text in claims:
@@ -893,13 +893,13 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_explicit_local_subject_ends_prior_exclusion_scope(self) -> None:
         claims = (
-            "This is not evidence that Fresh Handoff reduces goal tokens and the "
+            "This is not evidence that Relay reduces goal tokens and the "
             "candidate reduces goal tokens.",
-            "A paired study must pass before Fresh Handoff reduces goal tokens and "
+            "A paired study must pass before Relay reduces goal tokens and "
             "the candidate reduces goal tokens.",
-            "A claim that Fresh Handoff reduces token use is allowed only after "
+            "A claim that Relay reduces token use is allowed only after "
             "evidence and the candidate reduces goal tokens.",
-            "A historical claim that Fresh Handoff reduces token use failed and the "
+            "A historical claim that Relay reduces token use failed and the "
             "candidate reduces goal tokens.",
         )
         for text in claims:
@@ -908,9 +908,9 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_comparative_token_efficiency_claim_is_detected(self) -> None:
         claims = (
-            "Fresh Handoff is more token-efficient than the baseline.",
-            "Fresh Handoff provides better token efficiency.",
-            "Fresh Handoff provides greater token efficiency.",
+            "Relay is more token-efficient than the baseline.",
+            "Relay provides better token efficiency.",
+            "Relay provides greater token efficiency.",
         )
         for text in claims:
             with self.subTest(text=text):
@@ -918,22 +918,22 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_present_and_past_positive_claim_verbs_are_detected(self) -> None:
         claims = (
-            "Fresh Handoff saves goal tokens.",
-            "Fresh Handoff saved goal tokens.",
-            "Fresh Handoff reduces goal tokens.",
-            "Fresh Handoff reduced goal tokens.",
-            "Fresh Handoff lowers costs.",
-            "Fresh Handoff lowered costs.",
-            "Fresh Handoff improves token efficiency.",
-            "Fresh Handoff improved token efficiency.",
-            "Fresh Handoff boosts token efficiency.",
-            "Fresh Handoff boosted token efficiency.",
-            "Fresh Handoff enhances token efficiency.",
-            "Fresh Handoff enhanced token efficiency.",
-            "Fresh Handoff uses fewer tokens.",
-            "Fresh Handoff used fewer tokens.",
-            "Fresh Handoff consumes fewer tokens.",
-            "Fresh Handoff consumed fewer tokens.",
+            "Relay saves goal tokens.",
+            "Relay saved goal tokens.",
+            "Relay reduces goal tokens.",
+            "Relay reduced goal tokens.",
+            "Relay lowers costs.",
+            "Relay lowered costs.",
+            "Relay improves token efficiency.",
+            "Relay improved token efficiency.",
+            "Relay boosts token efficiency.",
+            "Relay boosted token efficiency.",
+            "Relay enhances token efficiency.",
+            "Relay enhanced token efficiency.",
+            "Relay uses fewer tokens.",
+            "Relay used fewer tokens.",
+            "Relay consumes fewer tokens.",
+            "Relay consumed fewer tokens.",
         )
         for text in claims:
             with self.subTest(text=text):
@@ -941,25 +941,25 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_bounded_efficiency_and_cost_vocabulary_is_detected(self) -> None:
         claims = (
-            "Fresh Handoff requires fewer tokens.",
-            "Fresh Handoff required fewer tokens.",
-            "Fresh Handoff needs fewer tokens.",
-            "Fresh Handoff needed fewer tokens.",
-            "Fresh Handoff has higher token efficiency.",
-            "Fresh Handoff and its adapters have better token efficiency.",
-            "Fresh Handoff had higher token efficiency.",
-            "Fresh Handoff is cheaper than the baseline.",
-            "Fresh Handoff was cheaper than the baseline.",
+            "Relay requires fewer tokens.",
+            "Relay required fewer tokens.",
+            "Relay needs fewer tokens.",
+            "Relay needed fewer tokens.",
+            "Relay has higher token efficiency.",
+            "Relay and its adapters have better token efficiency.",
+            "Relay had higher token efficiency.",
+            "Relay is cheaper than the baseline.",
+            "Relay was cheaper than the baseline.",
             "Fresh tasks are cheaper than the baseline.",
             "Fresh tasks were cheaper than the baseline.",
-            "Fresh Handoff costs less than the baseline.",
+            "Relay costs less than the baseline.",
             "Fresh tasks cost less than the baseline.",
-            "Fresh Handoff trims token usage.",
-            "Fresh Handoff trimmed token usage.",
-            "Fresh Handoff minimizes token usage.",
-            "Fresh Handoff minimized token usage.",
-            "Fresh Handoff yields lower token usage.",
-            "Fresh Handoff yielded lower token usage.",
+            "Relay trims token usage.",
+            "Relay trimmed token usage.",
+            "Relay minimizes token usage.",
+            "Relay minimized token usage.",
+            "Relay yields lower token usage.",
+            "Relay yielded lower token usage.",
         )
         for text in claims:
             with self.subTest(text=text):
@@ -967,10 +967,10 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_bounded_vocabulary_preserves_negative_and_conditional_controls(self) -> None:
         nonclaims = (
-            "Fresh Handoff does not require fewer tokens.",
-            "Fresh Handoff is not cheaper than the baseline.",
-            "This is not evidence that Fresh Handoff trims token usage.",
-            "A claim that Fresh Handoff minimizes token usage is allowed only after "
+            "Relay does not require fewer tokens.",
+            "Relay is not cheaper than the baseline.",
+            "This is not evidence that Relay trims token usage.",
+            "A claim that Relay minimizes token usage is allowed only after "
             "evidence.",
         )
         for text in nonclaims:
@@ -979,20 +979,20 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_leading_evidence_gate_modal_claims_are_nonclaims(self) -> None:
         nonclaims = (
-            "If paired evidence passes, Fresh Handoff may reduce token usage.",
-            "When the study succeeds, Fresh Handoff can improve token efficiency.",
-            "Unless the test fails, Fresh Handoff could lower token costs.",
-            "If paired evidence passes,\nFresh Handoff may reduce token usage and "
+            "If paired evidence passes, Relay may reduce token usage.",
+            "When the study succeeds, Relay can improve token efficiency.",
+            "Unless the test fails, Relay could lower token costs.",
+            "If paired evidence passes,\nRelay may reduce token usage and "
             "improve token efficiency.",
-            "If paired evidence passes, Fresh Handoff may reduce token usage and may "
+            "If paired evidence passes, Relay may reduce token usage and may "
             "improve token efficiency.",
-            "When the study succeeds, Fresh Handoff can reduce token usage or could "
+            "When the study succeeds, Relay can reduce token usage or could "
             "lower token costs.",
-            "Unless the test fails, Fresh Handoff MAY reduce token usage AND CAN "
+            "Unless the test fails, Relay MAY reduce token usage AND CAN "
             "improve token efficiency OR COULD lower token costs.",
-            "If paired evidence passes, Fresh Handoff may reduce token usage\nand may "
+            "If paired evidence passes, Relay may reduce token usage\nand may "
             "improve token efficiency.",
-            "If evidence passes, Fresh Handoff may reduce token usage, and may "
+            "If evidence passes, Relay may reduce token usage, and may "
             "improve token efficiency.",
         )
         for text in nonclaims:
@@ -1001,35 +1001,35 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_leading_evidence_gate_does_not_hide_independent_claims(self) -> None:
         claims = (
-            "Fresh Handoff may reduce token usage.",
-            "If paired evidence passes, Fresh Handoff reduces token usage.",
-            "If paired evidence passes, measurements are recorded, Fresh Handoff "
+            "Relay may reduce token usage.",
+            "If paired evidence passes, Relay reduces token usage.",
+            "If paired evidence passes, measurements are recorded, Relay "
             "may reduce token usage.",
-            "If paired evidence passes, Fresh Handoff may reduce token usage. Fresh "
+            "If paired evidence passes, Relay may reduce token usage. Fresh "
             "Handoff improves token efficiency.",
-            "If paired evidence passes, Fresh Handoff may reduce token usage, but "
-            "Fresh Handoff improves token efficiency.",
-            "If paired evidence passes, Fresh Handoff may reduce token usage and the "
+            "If paired evidence passes, Relay may reduce token usage, but "
+            "Relay improves token efficiency.",
+            "If paired evidence passes, Relay may reduce token usage and the "
             "candidate improves token efficiency.",
-            "Gift evidence passes, Fresh Handoff may reduce token usage.",
-            "Whenever evidence passes, Fresh Handoff may reduce token usage.",
-            "If paired evidence passes, Fresh Handoff may reduce token usage and the "
+            "Gift evidence passes, Relay may reduce token usage.",
+            "Whenever evidence passes, Relay may reduce token usage.",
+            "If paired evidence passes, Relay may reduce token usage and the "
             "tool may improve token efficiency.",
-            "If paired evidence passes, Fresh Handoff may reduce token usage and also "
+            "If paired evidence passes, Relay may reduce token usage and also "
             "may improve token efficiency.",
-            "If paired evidence passes, Fresh Handoff may reduce token usage and may "
+            "If paired evidence passes, Relay may reduce token usage and may "
             "later improve token efficiency.",
-            "If paired evidence passes, Fresh Handoff may reduce token usage and, may "
+            "If paired evidence passes, Relay may reduce token usage and, may "
             "improve token efficiency.",
-            "If paired evidence passes, Fresh Handoff reduces token usage and may "
+            "If paired evidence passes, Relay reduces token usage and may "
             "improve token efficiency.",
-            "Although paired evidence passes, Fresh Handoff may reduce token usage and "
+            "Although paired evidence passes, Relay may reduce token usage and "
             "may improve token efficiency.",
-            "If evidence passes, Fresh Handoff may reduce token usage: Fresh Handoff "
+            "If evidence passes, Relay may reduce token usage: Relay "
             "improves token efficiency.",
-            "If evidence passes, Fresh Handoff may reduce token usage — Fresh Handoff "
+            "If evidence passes, Relay may reduce token usage — Relay "
             "improves token efficiency.",
-            "If evidence passes, Fresh Handoff may reduce token usage – Fresh Handoff "
+            "If evidence passes, Relay may reduce token usage – Relay "
             "improves token efficiency.",
         )
         for text in claims:
@@ -1038,27 +1038,27 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_hard_boundaries_and_trailing_metadata_cannot_hide_claims(self) -> None:
         boundary_claims = (
-            "Fresh Handoff does not reduce token usage.Fresh Handoff improves token "
+            "Relay does not reduce token usage.Relay improves token "
             "efficiency.",
-            "Fresh Handoff does not reduce token usage.”Fresh Handoff improves token "
+            "Relay does not reduce token usage.”Relay improves token "
             "efficiency.",
-            "If evidence passes, Fresh Handoff may reduce token usage:Fresh Handoff "
+            "If evidence passes, Relay may reduce token usage:Relay "
             "improves token efficiency.",
-            "Fresh Handoff does not reduce token usage.“Fresh Handoff improves token "
+            "Relay does not reduce token usage.“Relay improves token "
             "efficiency.”",
-            "Fresh Handoff does not reduce token usage.‘Fresh Handoff improves token "
+            "Relay does not reduce token usage.‘Relay improves token "
             "efficiency.’",
-            "Fresh Handoff does not reduce token usage.»Fresh Handoff improves token "
+            "Relay does not reduce token usage.»Relay improves token "
             "efficiency.",
-            "Fresh Handoff does not reduce token usage.›Fresh Handoff improves token "
+            "Relay does not reduce token usage.›Relay improves token "
             "efficiency.",
-            "Fresh Handoff does not lower costs though Fresh Handoff improves token "
+            "Relay does not lower costs though Relay improves token "
             "efficiency.",
-            "Fresh Handoff does not lower costs even though Fresh Handoff improves "
+            "Relay does not lower costs even though Relay improves "
             "token efficiency.",
-            "The historical study failed though Fresh Handoff improves token "
+            "The historical study failed though Relay improves token "
             "efficiency.",
-            "The historical study failed even though Fresh Handoff improves token "
+            "The historical study failed even though Relay improves token "
             "efficiency.",
         )
         for text in boundary_claims:
@@ -1066,16 +1066,16 @@ class ReleaseReadinessTests(unittest.TestCase):
                 self.assertIn(text.index("improves"), tuple(release._claim_offsets(text)))
 
         suffix_claims = (
-            "Fresh Handoff reduces tokens and positive paired differences mean "
+            "Relay reduces tokens and positive paired differences mean "
             "candidate minus control.",
-            "Fresh Handoff reduces tokens and the claim is allowed only after evidence.",
-            "Fresh Handoff reduces tokens and the historical baseline is documented.",
-            "Fresh Handoff reduces tokens (positive paired differences mean candidate "
+            "Relay reduces tokens and the claim is allowed only after evidence.",
+            "Relay reduces tokens and the historical baseline is documented.",
+            "Relay reduces tokens (positive paired differences mean candidate "
             "minus control).",
-            "Fresh Handoff reduces tokens (the claim is allowed only after evidence).",
-            "Fresh Handoff reduces tokens (historical baseline, only 8 of 20).",
-            "Fresh Handoff reduces tokens (not evidence of lower costs).",
-            "Historical analysis shows Fresh Handoff reduces tokens.",
+            "Relay reduces tokens (the claim is allowed only after evidence).",
+            "Relay reduces tokens (historical baseline, only 8 of 20).",
+            "Relay reduces tokens (not evidence of lower costs).",
+            "Historical analysis shows Relay reduces tokens.",
         )
         for text in suffix_claims:
             with self.subTest(text=text):
@@ -1083,7 +1083,7 @@ class ReleaseReadinessTests(unittest.TestCase):
 
         self.assertFalse(
             release._contains_positive_claim(
-                "Version 2.0 does not prove Fresh Handoff reduces goal tokens."
+                "Version 2.0 does not prove Relay reduces goal tokens."
             )
         )
         self.assertEqual(
@@ -1093,12 +1093,12 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_suffix_qualifiers_keep_claims_nonclaiming(self) -> None:
         nonclaims = (
-            "A claim that Fresh Handoff reduces token use is allowed only after evidence.",
-            "A historical claim that Fresh Handoff reduces token use failed.",
-            "A historical assertion that Fresh Handoff improves token efficiency was "
+            "A claim that Relay reduces token use is allowed only after evidence.",
+            "A historical claim that Relay reduces token use failed.",
+            "A historical assertion that Relay improves token efficiency was "
             "a negative result.",
-            "A historical claim that Fresh Handoff reduces token use though it failed.",
-            "A historical assertion that Fresh Handoff improves token efficiency even "
+            "A historical claim that Relay reduces token use though it failed.",
+            "A historical assertion that Relay improves token efficiency even "
             "though it was a negative result.",
         )
         for text in nonclaims:
@@ -1133,17 +1133,17 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_claim_classifier_preserves_nonclaim_contexts(self) -> None:
         nonclaims = (
-            "Fresh Handoff does not reduce goal tokens.",
-            "Fresh Handoff does not lower costs and does not improve token efficiency.",
-            "Fresh Handoff does not lower costs or improve token efficiency.",
-            "Fresh Handoff does not save tokens, lower costs, or improve token efficiency.",
-            "Fresh Handoff never saves tokens or lowers costs.",
-            "This is not evidence that Fresh Handoff lowers costs and improves "
+            "Relay does not reduce goal tokens.",
+            "Relay does not lower costs and does not improve token efficiency.",
+            "Relay does not lower costs or improve token efficiency.",
+            "Relay does not save tokens, lower costs, or improve token efficiency.",
+            "Relay never saves tokens or lowers costs.",
+            "This is not evidence that Relay lowers costs and improves "
             "token efficiency.",
-            "A paired study must pass before Fresh Handoff reduces goal tokens.",
-            "A paired study must pass before Fresh Handoff reduces goal tokens and "
+            "A paired study must pass before Relay reduces goal tokens.",
+            "A paired study must pass before Relay reduces goal tokens and "
             "improves token efficiency.",
-            "This is not evidence that Fresh Handoff reduces goal tokens and "
+            "This is not evidence that Relay reduces goal tokens and "
             "improves token efficiency.",
             "The historical pre-v2 study failed and is not evidence that Fresh "
             "Handoff improves token efficiency.",

@@ -1899,6 +1899,27 @@ def _control_binding(
     return next(iter(identities.values()))
 
 
+def _trusted_python_interpreter(raw_interpreter: str) -> bool:
+    if Path(raw_interpreter).name not in {"python", "python3", "python3.14"}:
+        return False
+    resolved_interpreter = (
+        shutil.which(raw_interpreter)
+        if "/" not in raw_interpreter
+        else raw_interpreter
+    )
+    if not resolved_interpreter:
+        return False
+    try:
+        interpreter = Path(resolved_interpreter).expanduser().resolve(strict=True)
+        trusted = {Path(sys.executable).resolve(strict=True)}
+        path_python = shutil.which("python3")
+        if path_python:
+            trusted.add(Path(path_python).resolve(strict=True))
+    except OSError:
+        return False
+    return interpreter in trusted
+
+
 def _parse_bound_control_command(
     repo: Path,
     command: str,
@@ -1914,19 +1935,7 @@ def _parse_bound_control_command(
         return False
     script = Path(__file__).resolve()
     if Path(words[0]).name in {"python", "python3", "python3.14"}:
-        raw_interpreter = words[0]
-        resolved_interpreter = shutil.which(raw_interpreter) if "/" not in raw_interpreter else raw_interpreter
-        if not resolved_interpreter:
-            return False
-        try:
-            interpreter = Path(resolved_interpreter).expanduser().resolve(strict=True)
-            trusted = {Path(sys.executable).resolve(strict=True)}
-            path_python = shutil.which("python3")
-            if path_python:
-                trusted.add(Path(path_python).resolve(strict=True))
-        except OSError:
-            return False
-        if interpreter not in trusted:
+        if not _trusted_python_interpreter(words[0]):
             return False
         script_index = 1
     else:
@@ -1993,7 +2002,11 @@ def _parse_bound_control_command(
     return True
 
 
-def _parse_readonly_repo_command(repo: Path, command: str) -> bool:
+def _parse_readonly_repo_command(
+    repo: Path,
+    command: str,
+    binding: Mapping[str, Any] | None = None,
+) -> bool:
     if not command or _HOOK_METACHARACTERS.search(command):
         return False
     try:
@@ -2008,6 +2021,35 @@ def _parse_readonly_repo_command(repo: Path, command: str) -> bool:
         ("git", "rev-parse", "--show-toplevel"),
     }
     if tuple(words) not in allowed:
+        if (
+            len(words) == 3
+            and _trusted_python_interpreter(words[0])
+            and words[2] == "--help"
+        ):
+            script = Path(words[1]).expanduser().resolve()
+            installed_script = Path(__file__).resolve()
+            repo_script = (repo / "skills/relay/scripts/transfer_control.py").resolve()
+            known_scripts = {
+                installed_script,
+            }
+            if (
+                repo_script.is_file()
+                and repo_script.read_bytes() == installed_script.read_bytes()
+            ):
+                known_scripts.add(repo_script)
+            return script in known_scripts and script.is_file()
+        if (
+            binding
+            and len(words) == 4
+            and words[:2] == ["sed", "-n"]
+            and re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)?p", words[2])
+        ):
+            try:
+                target = Path(words[3]).expanduser().resolve()
+                capsule = Path(str(binding["capsule_path"])).expanduser().resolve()
+            except (KeyError, OSError):
+                return False
+            return target == capsule and target.is_file()
         return False
     if words == ["pwd"]:
         return True
@@ -2026,7 +2068,7 @@ def hook_pretool_decision(repo: Path, payload: Mapping[str, Any]) -> dict[str, A
     source = discover_source_for_actor(repo, actor) or actor
     decision = guard_write(repo, actor_session_id=actor, source_session_id=source)
     if decision["allowed"]:
-        return {"continue": True}
+        return {}
     reason = str(decision["reason"])
     raw_input = payload.get("tool_input") or payload.get("toolInput") or {}
     if not isinstance(raw_input, dict):
@@ -2035,7 +2077,7 @@ def hook_pretool_decision(repo: Path, payload: Mapping[str, Any]) -> dict[str, A
     command = str(raw_input.get("command") or raw_input.get("cmd") or "").strip()
     if reason == "destination_embargoed":
         if tool_name in _HOOK_READ_ONLY_TOOLS:
-            return {"continue": True}
+            return {}
         if tool_name in _HOOK_CONTROL_TOOLS:
             try:
                 binding = _control_binding(
@@ -2046,7 +2088,7 @@ def hook_pretool_decision(repo: Path, payload: Mapping[str, Any]) -> dict[str, A
             except TransferError:
                 binding = {}
             if binding and _parse_bound_control_command(repo, command, binding):
-                return {"continue": True}
+                return {}
             workdir = raw_input.get("workdir")
             try:
                 workdir_matches = (
@@ -2055,8 +2097,8 @@ def hook_pretool_decision(repo: Path, payload: Mapping[str, Any]) -> dict[str, A
                 )
             except OSError:
                 workdir_matches = False
-            if workdir_matches and _parse_readonly_repo_command(repo, command):
-                return {"continue": True}
+            if workdir_matches and _parse_readonly_repo_command(repo, command, binding):
+                return {}
     return {
         "continue": True,
         "hookSpecificOutput": {

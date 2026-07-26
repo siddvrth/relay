@@ -7,7 +7,7 @@
 - Git
 - Codex App or Codex CLI/OMX
 
-Fresh Handoff is Codex-only. Clean-task automation requires a Codex surface that exposes thread tools.
+Relay is Codex-only. Clean-task automation requires a Codex surface that exposes thread tools.
 
 ## Validate The Package
 
@@ -44,12 +44,14 @@ Plugin command hooks are not trusted merely because the plugin is installed or e
 
 Before relying on automatic events:
 
-1. Start Codex CLI in the target repository.
-2. Open `/hooks`.
-3. Confirm the Fresh Handoff hook source and definitions are loaded.
-4. Review and trust the current hook hashes.
-5. Recheck after any hook change, because trust is tied to the definition hash.
+1. Install or enable the Relay plugin.
+2. In Codex CLI only, open `/hooks`. In Codex App, use the plugin-hook trust prompt presented by the host.
+3. Confirm the Relay hook source and definitions are loaded.
+4. Review and trust the current hook hashes once.
+5. Recheck after a hook change, because trust is tied to the definition hash.
 6. Exercise `UserPromptSubmit`, `PreToolUse`, `PreCompact`, and `Stop` with a fully seeded transfer and retain sanitized release evidence.
+
+After this one-time setup, normal `/goal` work requires no manual handoff.
 
 Release evidence in `artifacts/metrics/live-hooks-trust.json` is valid only for 24 hours and must bind `schema_version:1`, `evidence_type:"codex_live_hooks_trust"`, `checked_via:"/hooks"`, all four hook events, the current plugin version, the SHA-256 of `hooks/hooks.json`, and SHA-256 values for the plugin, Codex, and workflow adapters.
 

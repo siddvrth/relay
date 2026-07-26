@@ -1,6 +1,6 @@
 # Codex Integrations
 
-Fresh Handoff supports Codex surfaces only. The Python runtime creates session-scoped capsules and internal orchestration results; each integration translates those results into capabilities allowed by its host.
+Relay supports Codex surfaces only. The Python runtime creates session-scoped capsules and internal orchestration results; each integration translates those results into capabilities allowed by its host.
 
 ## Codex App
 
@@ -19,24 +19,25 @@ Goal text can be preserved, but host-owned goal identity may not transfer. The c
 
 ## Codex Hooks
 
-All command hooks receive JSON on stdin. Current [official hook documentation](https://learn.chatgpt.com/docs/hooks) documents `session_id` as common input. `UserPromptSubmit` also documents `prompt`; it does not document a context-used ratio.
+All command hooks receive JSON on stdin. Current [official hook documentation](https://learn.chatgpt.com/docs/hooks) documents `session_id` and `transcript_path` as common input, but warns that the transcript format is not stable.
 
-Fresh Handoff therefore treats additional ratio fields as compatibility telemetry only:
+Relay therefore treats additional ratio fields as compatibility telemetry only:
 
 - compatible ratio at or above `0.30`: threshold path is eligible
-- missing ratio on `UserPromptSubmit`: no exact 30%-used claim
-- `PreCompact`: deterministic checkpoint fallback before compaction
+- otherwise, `PreToolUse` reads a bounded transcript tail for the latest current input and associated effective context window
+- missing, malformed, or changed usage: fail open
+- `PreCompact`: deterministic checkpoint fallback before compaction, not a task launcher
 
 The adapters keep internal and official JSON separate:
 
-| Event | Allowed Fresh Handoff response |
+| Event | Allowed Relay response |
 | --- | --- |
 | `UserPromptSubmit` | Common fields plus one `relay.codex_app.clean_task.v1` source launch envelope in `hookSpecificOutput.additionalContext` when delivery is emitted |
-| `PreToolUse` | Deny source/pending-destination writes; allow strict read-only and canonical transfer-control operations |
-| `PreCompact` | Common fields; a delivery-emitting checkpoint carries the same source launch envelope in `systemMessage` |
+| `PreToolUse` | Model-visible launch context when ready, or a documented permission decision; allowed calls emit no unsupported common fields |
+| `PreCompact` | Common fields reporting a refreshed checkpoint only |
 | `Stop` | Common output fields only |
 
-Internal capsule paths, metrics, guards, overflow records, delivery details, and V3 observation rows do not leak into official stdout unless the schema allows them. Adapters must not fabricate unavailable acknowledgement, stop, latency, token, or intervention telemetry. Errors fail open with `{"continue":true}`.
+Internal capsule paths, metrics, guards, overflow records, delivery details, and V3 observation rows do not leak into official stdout unless the schema allows them. Adapters must not fabricate unavailable acknowledgement, stop, latency, token, or intervention telemetry. Errors fail open. `PreToolUse` emits `{}` when no event-specific output is required; other events use their documented common fields.
 
 ## Plugin-Bundled Hooks
 
@@ -44,11 +45,11 @@ The plugin uses the documented default `hooks/hooks.json`; an explicit `hooks` f
 
 After install or any hook change:
 
-1. Open `/hooks` in Codex CLI.
-2. Confirm the Fresh Handoff definitions and source are loaded.
-3. Review and trust the current hook hash.
+1. In Codex CLI, open `/hooks`; in Codex App, use the plugin-hook trust prompt.
+2. Confirm the Relay definitions and source are loaded.
+3. Review and trust the current hook hash once.
 4. Exercise `UserPromptSubmit`, `PreToolUse`, `PreCompact`, and `Stop` with a fully seeded transfer.
-5. Record the live evidence for release acceptance.
+5. After that setup, normal Goal Mode handoff is automatic.
 
 Installation and static validation alone do not prove load/trust.
 
@@ -70,7 +71,7 @@ The CLI adapter can checkpoint and emit allowed hook context. Automatic clean-ta
 
 | Surface | Ready capsule | Official envelope | Auto-create clean task | Live trust check |
 | --- | --- | --- | --- | --- |
-| Codex App with thread tools | Yes | When hooks run | Yes | Host-dependent |
+| Codex App with thread tools | Yes | When hooks run | Yes | One-time plugin-hook trust |
 | Codex App without thread tools | Yes | When hooks run | No | Host-dependent |
 | Codex CLI/OMX | Yes | Yes | Requires agent orchestration | `/hooks` |
 

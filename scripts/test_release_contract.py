@@ -39,7 +39,7 @@ def initialize_repo(repo: Path, paths: tuple[str, ...] = BASE_PATHS) -> str:
     plugin.mkdir()
     (repo / "bin").mkdir()
     (plugin / "plugin.json").write_text(
-        '{"name":"fresh-handoff","version":"1.2.3"}\n',
+        '{"name":"relay","version":"1.2.3"}\n',
         encoding="utf-8",
     )
     (plugin / "release-files.json").write_text(

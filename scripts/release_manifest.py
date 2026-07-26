@@ -153,7 +153,7 @@ def parse_release_manifest(payload: bytes) -> ReleaseManifest:
     if set(archive_document) != {"path", "sha256", "size"}:
         raise ManifestError(reason="archive has invalid fields")
     archive_path = _text(archive_document["path"], "archive.path")
-    expected_archive = f"fresh-handoff-{version}-{commit}.tar.gz"
+    expected_archive = f"relay-{version}-{commit}.tar.gz"
     if PurePosixPath(archive_path).name != archive_path or archive_path != expected_archive:
         raise ManifestError(reason="archive.path is not the canonical release name")
     raw_files = root["files"]
