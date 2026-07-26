@@ -70,6 +70,9 @@ done
 python3 "$PKG/scripts/validate_distribution.py"
 python3 "$PKG/scripts/test_release_contract.py"
 python3 "$PKG/scripts/test_build_release.py"
+python3 "$PKG/scripts/test_verify_release.py"
+python3 "$PKG/scripts/test_verify_release_adversarial.py"
+python3 "$PKG/scripts/test_verify_release_identity.py"
 python3 "$PKG/scripts/test_release_readiness.py"
 python3 "$SKILL/test_transfer_control.py" -q
 python3 "$SKILL/test_transfer_integration.py" -q
