@@ -114,8 +114,6 @@ def json_payload(result: subprocess.CompletedProcess[str]) -> dict[str, object]:
 
 
 def contract_value(payload: dict[str, object], *names: str) -> object | None:
-    """Find a named value in the small nested internal contract."""
-
     wanted = set(names)
     queue: list[object] = [payload]
     while queue:
@@ -183,7 +181,7 @@ def rich_handoff_args(repo: Path, *, session_id: str = "session-rich") -> list[s
         "--session-id",
         session_id,
         "--objective",
-        "Ship the token-efficient fresh handoff",
+        "Ship the token-efficient relay package",
         "--active-task",
         "Lock the v2 capsule contract with deterministic tests",
         "--phase",
@@ -626,7 +624,7 @@ class WriteHandoffTests(unittest.TestCase):
             self.assertFalse(contract_value(payload, "skipped"))
             self.assertTrue(out.exists())
             content = out.read_text(encoding="utf-8")
-            self.assertIn("Ship the token-efficient fresh handoff", content)
+            self.assertIn("Ship the token-efficient relay package", content)
             self.assertIn("Implement deterministic capsule budgeting", content)
 
     def test_threshold_writes_at_exact_30(self) -> None:
@@ -706,14 +704,14 @@ class WriteHandoffTests(unittest.TestCase):
                 "--out",
                 str(out),
                 "--goal-objective",
-                "ship checkpoint and continue",
+                "ship the relay continuation",
                 "--commands-run",
                 "python3 -m py_compile scripts/write_handoff.py",
             )
             json_payload(result)
             content = out.read_text(encoding="utf-8")
             self.assertIn("Goal Mode Objective", content)
-            self.assertIn("ship checkpoint and continue", content)
+            self.assertIn("ship the relay continuation", content)
             self.assertIn("UTF-8 byte budgets are authoritative", content)
             self.assertIn("Live hook trust still requires host validation", content)
             self.assertIn("Regression suite added; runtime validation pending", content)
@@ -727,7 +725,7 @@ class WriteHandoffTests(unittest.TestCase):
             payload = json_payload(result)
             content = out.read_text(encoding="utf-8")
             required = [
-                "Ship the token-efficient fresh handoff",
+                "Ship the token-efficient relay package",
                 "Lock the v2 capsule contract with deterministic tests",
                 "regression suite",
                 "implementation in progress",
@@ -1060,7 +1058,7 @@ class TokenEfficientCapsuleTests(unittest.TestCase):
         cases.append(("placeholder", placeholder, "session-a", "placeholder"))
         circular = dict(
             base,
-            next_action="Read this checkpoint and continue from the recorded Next Action",
+            next_action="Read this capsule and resume from the recorded Next Action",
         )
         cases.append(("circular", circular, "session-a", "circular"))
         cross_session = dict(base)
@@ -2203,7 +2201,7 @@ class ContextHandoffTests(unittest.TestCase):
     def test_live_sized_goal_prompt_fits_the_default_budget(self) -> None:
         prompt = build_continuation_prompt(
             Path(
-                "/Users/example/Documents/continuous-codex/.omx/state/relay/"
+                "/Users/example/Documents/relay/.omx/state/relay/"
                 "sessions/392fc04f4114b8c3/20260726-030809-890000-r10-handoff.md"
             ),
             session_id="019f9d3f-5002-7ad0-b6a1-9ed67eb5c96a",
@@ -2420,7 +2418,7 @@ class HookEnvelopeAndParityTests(unittest.TestCase):
                 self.assertIsInstance(capsule_path, str)
                 capsule = Path(str(capsule_path)).read_text(encoding="utf-8")
                 self.assertNotIn(str(prompt), capsule)
-                self.assertIn("Ship the token-efficient fresh handoff", capsule)
+                self.assertIn("Ship the token-efficient relay package", capsule)
 
                 normalized[name] = {
                     "keys": sorted(payload),
@@ -2455,155 +2453,11 @@ class HookEnvelopeAndParityTests(unittest.TestCase):
 
 
 @unittest.skipUnless(PACKAGE_ROOT is not None, "portable package source is not installed")
-class LegacyMigrationTests(unittest.TestCase):
-    @staticmethod
-    def legacy_capsule(objective: str) -> bytes:
-        return (
-            "# Session Continuity Handoff\n\n"
-            "## Objective\n\n"
-            f"{objective}\n\n"
-            "## Next Action\n\n"
-            "Run the targeted regression suite.\n\n"
-            "## Decisions\n\n- Preserve legacy bytes.\n\n"
-            "## Blockers / Risks\n\n- Host trust is unknown.\n\n"
-            "## Validation Status\n\n- Not yet run.\n\n"
-            "## Files Touched\n\n- skills/relay/scripts/write_handoff.py\n"
-        ).encode("utf-8")
-
-    def test_install_imports_newest_legacy_state_copy_on_write_and_idempotently(self) -> None:
+class InstallAtomicityTests(unittest.TestCase):
+    def test_successful_install_enforces_installed_budgets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             init_repo(repo)
-            legacy_skill = repo / ".agents/skills/session-continuity"
-            legacy_skill.mkdir(parents=True)
-            marker = b"legacy skill bytes must be archived, not rewritten\n"
-            (legacy_skill / "legacy-marker.bin").write_bytes(marker)
-
-            legacy_state = repo / ".omx/state/session-continuity"
-            legacy_state.mkdir(parents=True)
-            older = legacy_state / "20260101-000000-000001-handoff.md"
-            newest = legacy_state / "20260102-000000-000002-handoff.md"
-            malformed = legacy_state / "20260103-000000-000003-handoff.md"
-            older_bytes = self.legacy_capsule("older valid legacy objective")
-            newest_bytes = self.legacy_capsule("newest valid legacy objective")
-            malformed_bytes = b"\xff\xfe\x00not-a-valid-utf8-checkpoint"
-            older.write_bytes(older_bytes)
-            newest.write_bytes(newest_bytes)
-            malformed.write_bytes(malformed_bytes)
-
-            first = subprocess.run(
-                ["bash", str(INSTALL), str(repo)],
-                text=True,
-                capture_output=True,
-                check=False,
-                cwd=REPO,
-            )
-            self.assertEqual(first.returncode, 0, first.stderr)
-            self.assertEqual(older.read_bytes(), older_bytes)
-            self.assertEqual(newest.read_bytes(), newest_bytes)
-            self.assertEqual(malformed.read_bytes(), malformed_bytes)
-            self.assertFalse(legacy_skill.exists())
-            archived_markers = [
-                path
-                for path in repo.rglob("legacy-marker.bin")
-                if ".agents/skills/session-continuity" not in str(path)
-            ]
-            self.assertEqual(len(archived_markers), 1)
-            self.assertEqual(archived_markers[0].read_bytes(), marker)
-
-            canonical = repo / ".omx/state/relay"
-            imported = [
-                path
-                for path in canonical.rglob("*")
-                if path.is_file() and path.read_bytes() == newest_bytes
-            ]
-            self.assertEqual(len(imported), 1)
-            self.assertFalse(
-                any(
-                    path.read_bytes() == malformed_bytes
-                    for path in canonical.rglob("*")
-                    if path.is_file()
-                )
-            )
-            newest_sha = hashlib.sha256(newest_bytes).hexdigest()
-            provenance_records: list[dict[str, object]] = []
-            for path in canonical.rglob("*"):
-                if not path.is_file():
-                    continue
-                try:
-                    value = json.loads(path.read_text(encoding="utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    continue
-                if isinstance(value, dict) and newest_sha in json.dumps(value):
-                    provenance_records.append(value)
-            self.assertEqual(len(provenance_records), 1)
-            provenance_text = json.dumps(provenance_records[0], sort_keys=True)
-            self.assertIn("session-continuity", provenance_text)
-            self.assertIn(str(newest), provenance_text)
-            self.assertIn(newest_sha, provenance_text)
-
-            before = {
-                str(path.relative_to(canonical)): hashlib.sha256(path.read_bytes()).hexdigest()
-                for path in canonical.rglob("*")
-                if path.is_file()
-            }
-            second = subprocess.run(
-                ["bash", str(INSTALL), str(repo)],
-                text=True,
-                capture_output=True,
-                check=False,
-                cwd=REPO,
-            )
-            self.assertEqual(second.returncode, 0, second.stderr)
-            after = {
-                str(path.relative_to(canonical)): hashlib.sha256(path.read_bytes()).hexdigest()
-                for path in canonical.rglob("*")
-                if path.is_file()
-            }
-            self.assertEqual(after, before)
-
-            audit = subprocess.run(
-                ["bash", str(AUDIT_INSTALL), str(repo)],
-                text=True,
-                capture_output=True,
-                check=False,
-                cwd=REPO,
-            )
-            self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
-
-    def test_successful_install_retires_legacy_writer_and_enforces_installed_budgets(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            init_repo(repo)
-            legacy_skill = repo / ".agents/skills/session-continuity"
-            legacy_writer = legacy_skill / "scripts/write_handoff.py"
-            legacy_writer.parent.mkdir(parents=True)
-            legacy_bytes = (
-                b"#!/usr/bin/env python3\n"
-                b"from pathlib import Path\n"
-                b"Path('legacy-oversized.md').write_bytes(b'x' * 4757)\n"
-            )
-            legacy_writer.write_bytes(legacy_bytes)
-            legacy_writer.chmod(0o751)
-
-            archive_root = repo / ".agents/archived-skills"
-            collision = archive_root / "session-continuity"
-            collision.mkdir(parents=True)
-            collision_marker = collision / "existing.bin"
-            collision_marker.write_bytes(b"preexisting archive collision\n")
-
-            legacy_state = repo / ".omx/state/session-continuity"
-            legacy_state.mkdir(parents=True)
-            source = legacy_state / "20260102-000000-000002-handoff.md"
-            source.write_bytes(self.legacy_capsule("newer successful import"))
-            os.utime(source, (200, 200))
-            sessions_root = repo / ".omx/state/relay/sessions"
-            final_dir = sessions_root / "legacy-import"
-            final_dir.mkdir(parents=True)
-            previous_import = final_dir / "20260101-000000-000001-handoff.md"
-            previous_import.write_bytes(self.legacy_capsule("prior successful import"))
-            os.utime(previous_import, (100, 100))
-            (final_dir / "migration.json").write_bytes(b'{"previous":true}\n')
 
             install = subprocess.run(
                 ["bash", str(INSTALL), str(repo)],
@@ -2613,13 +2467,6 @@ class LegacyMigrationTests(unittest.TestCase):
                 cwd=REPO,
             )
             self.assertEqual(install.returncode, 0, install.stderr)
-            self.assertFalse(legacy_skill.exists())
-            self.assertEqual(collision_marker.read_bytes(), b"preexisting archive collision\n")
-            archived_writers = list(archive_root.glob("session-continuity-*/scripts/write_handoff.py"))
-            self.assertEqual(len(archived_writers), 1)
-            self.assertEqual(archived_writers[0].read_bytes(), legacy_bytes)
-            self.assertEqual(archived_writers[0].stat().st_mode & 0o777, 0o751)
-            self.assertEqual(list(sessions_root.glob(".legacy-import-*")), [])
 
             installed_writer = (
                 repo
@@ -2681,57 +2528,7 @@ class LegacyMigrationTests(unittest.TestCase):
                     self.assertEqual(oversized.stderr.strip(), expected_error)
                     self.assertFalse(oversized_out.exists())
 
-    def test_newer_canonical_state_wins_and_active_legacy_conflict_fails_audit(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            init_repo(repo)
-            legacy_state = repo / ".omx/state/session-continuity"
-            canonical_state = repo / ".omx/state/relay"
-            legacy_state.mkdir(parents=True)
-            canonical_state.mkdir(parents=True)
-            legacy = legacy_state / "20260101-000000-000001-handoff.md"
-            canonical = canonical_state / "20260103-000000-000003-handoff.md"
-            legacy_bytes = self.legacy_capsule("legacy must not override canonical")
-            canonical_bytes = b"canonical newer checkpoint bytes\n"
-            legacy.write_bytes(legacy_bytes)
-            canonical.write_bytes(canonical_bytes)
-            os.utime(legacy, (100, 100))
-            os.utime(canonical, (200, 200))
-
-            install = subprocess.run(
-                ["bash", str(INSTALL), str(repo)],
-                text=True,
-                capture_output=True,
-                check=False,
-                cwd=REPO,
-            )
-            self.assertEqual(install.returncode, 0, install.stderr)
-            self.assertEqual(legacy.read_bytes(), legacy_bytes)
-            self.assertEqual(canonical.read_bytes(), canonical_bytes)
-            self.assertFalse(
-                any(
-                    path.read_bytes() == legacy_bytes
-                    for path in canonical_state.rglob("*")
-                    if path.is_file()
-                )
-            )
-
-            conflict = repo / ".agents/skills/session-continuity"
-            conflict.mkdir(parents=True)
-            (conflict / "SKILL.md").write_text("legacy conflict\n", encoding="utf-8")
-            audit = subprocess.run(
-                ["bash", str(AUDIT_INSTALL), str(repo)],
-                text=True,
-                capture_output=True,
-                check=False,
-                cwd=REPO,
-            )
-            self.assertNotEqual(audit.returncode, 0)
-            message = (audit.stdout + audit.stderr).lower()
-            self.assertIn("session-continuity", message)
-            self.assertIn("legacy", message)
-
-    def test_failed_canonical_staging_preserves_existing_install_and_legacy_skill(self) -> None:
+    def test_failed_canonical_staging_preserves_existing_install(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()
@@ -2743,15 +2540,6 @@ class LegacyMigrationTests(unittest.TestCase):
             target_hook = repo / "scripts/workflow/relay_hook.sh"
             target_hook.parent.mkdir(parents=True)
             target_hook.write_bytes(b"existing canonical hook\n")
-            legacy_skill = repo / ".agents/skills/session-continuity"
-            legacy_skill.mkdir(parents=True)
-            legacy_marker = legacy_skill / "legacy-marker.bin"
-            legacy_marker.write_bytes(b"active legacy skill\n")
-            legacy_writer = legacy_skill / "scripts/write_handoff.py"
-            legacy_writer.parent.mkdir(parents=True)
-            legacy_writer_bytes = b"#!/usr/bin/env python3\nprint('legacy writer')\n"
-            legacy_writer.write_bytes(legacy_writer_bytes)
-            legacy_writer.chmod(0o751)
 
             stub_dir = Path(tmp) / "bin"
             stub_dir.mkdir()
@@ -2772,10 +2560,6 @@ class LegacyMigrationTests(unittest.TestCase):
             self.assertNotEqual(install.returncode, 0)
             self.assertEqual(skill_marker.read_bytes(), b"existing canonical skill\n")
             self.assertEqual(target_hook.read_bytes(), b"existing canonical hook\n")
-            self.assertEqual(legacy_marker.read_bytes(), b"active legacy skill\n")
-            self.assertEqual(legacy_writer.read_bytes(), legacy_writer_bytes)
-            self.assertEqual(legacy_writer.stat().st_mode & 0o777, 0o751)
-            self.assertTrue(legacy_skill.is_dir())
 
     def test_fresh_repo_staging_failure_removes_created_namespace_and_stage_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2857,146 +2641,6 @@ class LegacyMigrationTests(unittest.TestCase):
                     [],
                 )
 
-    def test_staging_failure_rolls_back_migration_and_all_live_surfaces(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp) / "repo"
-            repo.mkdir()
-            init_repo(repo)
-
-            target_skill = repo / ".agents/skills/relay"
-            target_skill.mkdir(parents=True)
-            skill_marker = target_skill / "existing-marker.bin"
-            skill_marker.write_bytes(b"existing canonical skill\n")
-            target_hook = repo / "scripts/workflow/relay_hook.sh"
-            target_hook.parent.mkdir(parents=True)
-            target_hook.write_bytes(b"existing canonical hook\n")
-            legacy_skill = repo / ".agents/skills/session-continuity"
-            legacy_skill.mkdir(parents=True)
-            legacy_marker = legacy_skill / "legacy-marker.bin"
-            legacy_marker.write_bytes(b"active legacy skill\n")
-            legacy_writer = legacy_skill / "scripts/write_handoff.py"
-            legacy_writer.parent.mkdir(parents=True)
-            legacy_writer_bytes = b"#!/usr/bin/env python3\nprint('legacy writer')\n"
-            legacy_writer.write_bytes(legacy_writer_bytes)
-            legacy_writer.chmod(0o751)
-
-            legacy_state = repo / ".omx/state/session-continuity"
-            legacy_state.mkdir(parents=True)
-            source = legacy_state / "20260102-000000-000002-handoff.md"
-            source.write_bytes(self.legacy_capsule("newer migration candidate"))
-            os.utime(source, (200, 200))
-
-            sessions_root = repo / ".omx/state/relay/sessions"
-            final_dir = sessions_root / "legacy-import"
-            final_dir.mkdir(parents=True)
-            previous_import = final_dir / "20260101-000000-000001-handoff.md"
-            previous_import.write_bytes(self.legacy_capsule("previous imported state"))
-            os.utime(previous_import, (100, 100))
-            previous_provenance = final_dir / "migration.json"
-            previous_provenance.write_bytes(b'{"previous":true}\n')
-            before = {
-                str(path.relative_to(sessions_root)): path.read_bytes()
-                for path in sessions_root.rglob("*")
-                if path.is_file()
-            }
-
-            stub_dir = Path(tmp) / "bin"
-            stub_dir.mkdir()
-            cp_stub = stub_dir / "cp"
-            cp_stub.write_text("#!/usr/bin/env bash\nexit 97\n", encoding="utf-8")
-            cp_stub.chmod(0o755)
-            env = os.environ.copy()
-            env["PATH"] = f"{stub_dir}{os.pathsep}{env['PATH']}"
-            install = subprocess.run(
-                ["bash", str(INSTALL), str(repo)],
-                text=True,
-                capture_output=True,
-                check=False,
-                cwd=REPO,
-                env=env,
-            )
-
-            self.assertNotEqual(install.returncode, 0)
-            after = {
-                str(path.relative_to(sessions_root)): path.read_bytes()
-                for path in sessions_root.rglob("*")
-                if path.is_file()
-            }
-            self.assertEqual(after, before)
-            self.assertEqual(skill_marker.read_bytes(), b"existing canonical skill\n")
-            self.assertEqual(target_hook.read_bytes(), b"existing canonical hook\n")
-            self.assertEqual(legacy_marker.read_bytes(), b"active legacy skill\n")
-
-    def test_failure_after_migration_and_archive_rolls_back_every_live_surface(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            init_repo(repo)
-            target_skill = repo / ".agents/skills/relay"
-            target_skill.mkdir(parents=True)
-            skill_marker = target_skill / "existing-marker.bin"
-            skill_marker.write_bytes(b"existing canonical skill\n")
-            target_hook = repo / "scripts/workflow/relay_hook.sh"
-            target_hook.parent.mkdir(parents=True)
-            target_hook.write_bytes(b"existing canonical hook\n")
-            legacy_skill = repo / ".agents/skills/session-continuity"
-            legacy_skill.mkdir(parents=True)
-            legacy_marker = legacy_skill / "legacy-marker.bin"
-            legacy_marker.write_bytes(b"active legacy skill\n")
-            legacy_writer = legacy_skill / "scripts/write_handoff.py"
-            legacy_writer.parent.mkdir(parents=True)
-            legacy_writer_bytes = b"#!/usr/bin/env python3\nprint('legacy writer')\n"
-            legacy_writer.write_bytes(legacy_writer_bytes)
-            legacy_writer.chmod(0o751)
-
-            legacy_state = repo / ".omx/state/session-continuity"
-            legacy_state.mkdir(parents=True)
-            source = legacy_state / "20260102-000000-000002-handoff.md"
-            source.write_bytes(self.legacy_capsule("newer migration candidate"))
-            os.utime(source, (200, 200))
-            sessions_root = repo / ".omx/state/relay/sessions"
-            final_dir = sessions_root / "legacy-import"
-            final_dir.mkdir(parents=True)
-            previous_import = final_dir / "20260101-000000-000001-handoff.md"
-            previous_import.write_bytes(self.legacy_capsule("previous imported state"))
-            os.utime(previous_import, (100, 100))
-            previous_provenance = final_dir / "migration.json"
-            previous_provenance.write_bytes(b'{"previous":true}\n')
-            before = {
-                str(path.relative_to(sessions_root)): path.read_bytes()
-                for path in sessions_root.rglob("*")
-                if path.is_file()
-            }
-
-            env = os.environ.copy()
-            env["RELAY_INSTALL_FAULT"] = "combined_finalize"
-            install = subprocess.run(
-                ["bash", str(INSTALL), str(repo)],
-                text=True,
-                capture_output=True,
-                check=False,
-                cwd=REPO,
-                env=env,
-            )
-
-            self.assertNotEqual(install.returncode, 0)
-            after = {
-                str(path.relative_to(sessions_root)): path.read_bytes()
-                for path in sessions_root.rglob("*")
-                if path.is_file()
-            }
-            self.assertEqual(after, before)
-            self.assertEqual(skill_marker.read_bytes(), b"existing canonical skill\n")
-            self.assertEqual(target_hook.read_bytes(), b"existing canonical hook\n")
-            self.assertEqual(legacy_marker.read_bytes(), b"active legacy skill\n")
-            self.assertEqual(legacy_writer.read_bytes(), legacy_writer_bytes)
-            self.assertEqual(legacy_writer.stat().st_mode & 0o777, 0o751)
-            self.assertFalse((repo / ".agents/archived-skills").exists())
-            self.assertEqual(list(sessions_root.glob(".legacy-import-*")), [])
-            self.assertEqual(
-                list((repo / ".agents").glob(".relay-install.*")),
-                [],
-            )
-
     def test_failed_hook_swap_rolls_back_both_canonical_surfaces(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
@@ -3025,33 +2669,20 @@ class LegacyMigrationTests(unittest.TestCase):
             self.assertEqual(skill_marker.read_bytes(), b"existing canonical skill\n")
             self.assertEqual(target_hook.read_bytes(), b"existing canonical hook\n")
 
-    def test_failed_migration_publish_restores_existing_import_before_archive(self) -> None:
+    def test_failure_after_finalize_rolls_back_canonical_surfaces(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             init_repo(repo)
-            legacy_skill = repo / ".agents/skills/session-continuity"
-            legacy_skill.mkdir(parents=True)
-            legacy_marker = legacy_skill / "legacy-marker.bin"
-            legacy_marker.write_bytes(b"legacy remains active on failure\n")
-
-            legacy_state = repo / ".omx/state/session-continuity"
-            legacy_state.mkdir(parents=True)
-            source = legacy_state / "20260102-000000-000002-handoff.md"
-            source.write_bytes(self.legacy_capsule("newer migration candidate"))
-            os.utime(source, (200, 200))
-
-            final_dir = (
-                repo
-                / ".omx/state/relay/sessions/legacy-import"
-            )
-            final_dir.mkdir(parents=True)
-            existing = final_dir / "20260101-000000-000001-handoff.md"
-            existing_bytes = b"existing imported checkpoint\n"
-            existing.write_bytes(existing_bytes)
-            os.utime(existing, (100, 100))
+            target_skill = repo / ".agents/skills/relay"
+            target_skill.mkdir(parents=True)
+            skill_marker = target_skill / "existing-marker.bin"
+            skill_marker.write_bytes(b"existing canonical skill\n")
+            target_hook = repo / "scripts/workflow/relay_hook.sh"
+            target_hook.parent.mkdir(parents=True)
+            target_hook.write_bytes(b"existing canonical hook\n")
 
             env = os.environ.copy()
-            env["RELAY_INSTALL_FAULT"] = "migration_publish"
+            env["RELAY_INSTALL_FAULT"] = "canonical_finalize"
             install = subprocess.run(
                 ["bash", str(INSTALL), str(repo)],
                 text=True,
@@ -3062,12 +2693,12 @@ class LegacyMigrationTests(unittest.TestCase):
             )
 
             self.assertNotEqual(install.returncode, 0)
-            self.assertEqual(existing.read_bytes(), existing_bytes)
+            self.assertEqual(skill_marker.read_bytes(), b"existing canonical skill\n")
+            self.assertEqual(target_hook.read_bytes(), b"existing canonical hook\n")
             self.assertEqual(
-                legacy_marker.read_bytes(),
-                b"legacy remains active on failure\n",
+                list((repo / ".agents").glob(".relay-install.*")),
+                [],
             )
-            self.assertTrue(legacy_skill.is_dir())
 
 
 class GoalTelemetryReportTests(unittest.TestCase):
@@ -3102,7 +2733,7 @@ class GoalTelemetryReportTests(unittest.TestCase):
                 )
         return {
             "schema_version": 2,
-            "study_type": "token_efficient_fresh_handoff_v2",
+            "study_type": "token_efficient_relay_v2",
             "telemetry_scope": "exact_goal_period_tokensUsed",
             "control_condition": "current_canonical",
             "candidate_condition": "candidate",
@@ -3142,7 +2773,7 @@ class GoalTelemetryReportTests(unittest.TestCase):
     def v3_document(cls, *, pair_count: int = 20) -> dict[str, object]:
         document = cls.v2_document(pair_count=pair_count)
         document["schema_version"] = 3
-        document["study_type"] = "token_efficient_fresh_handoff_v3"
+        document["study_type"] = "token_efficient_relay_v3"
         document["telemetry_scope"] = "aggregate_source_destination_chain_tokensUsed"
         rows = document["rows"]
         assert isinstance(rows, list)
@@ -3661,7 +3292,7 @@ class GoalTelemetryReportTests(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout)["schema_version"], expected_schema)
 
             mixed = self.v3_document()
-            mixed["study_type"] = "token_efficient_fresh_handoff_v2"
+            mixed["study_type"] = "token_efficient_relay_v2"
             study_path.write_text(json.dumps(mixed), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, str(GOAL_TELEMETRY_REPORT), "--study-json", str(study_path)],

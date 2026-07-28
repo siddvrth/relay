@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused hostile tests for the acknowledgement/ownership core."""
+"""Hostile tests for acknowledgement and ownership."""
 
 from __future__ import annotations
 

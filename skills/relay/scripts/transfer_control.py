@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Durable acknowledgement and sole-writer transfer control.
-
-This module intentionally uses only the Python standard library.  The ownership
-record is authoritative; transfer records and active pointers are projections
-that can be repaired after an interrupted acknowledgement.
-"""
+"""Transfer ownership and acknowledgement (stdlib only)."""
 
 from __future__ import annotations
 
@@ -65,9 +60,7 @@ STOP_CAPABILITIES = {
     "process_group_interruption_unavailable",
     "unsupported",
 }
-# Safe substitute until a host adapter can persist and revalidate leader PID,
-# PGID, process start identity, and runtime-registration provenance.  The core
-# deliberately exposes evidence of unavailability and contains no kill path.
+# No kill path. Unavailable until a host adapter can prove PID/PGID/start tokens.
 PROCESS_GROUP_INTERRUPTION = {
     "available": False,
     "reason": "host_adapter_must_prove_leader_pid_pgid_start_and_runtime_tokens",
@@ -91,15 +84,13 @@ FAULT_ENV = "RELAY_TRANSFER_FAULT"
 
 
 class TransferError(RuntimeError):
-    """A state-machine rejection with a stable machine-readable code."""
-
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
 
 
 class FaultInjected(RuntimeError):
-    """Raised by deterministic durability-boundary tests."""
+    """Injected by durability tests."""
 
 
 @dataclass(frozen=True)
@@ -116,7 +107,7 @@ class TransferPaths:
 
 @dataclass(frozen=True)
 class WriteFence:
-    """Authority snapshot valid only while the transfer lock remains held."""
+    """Valid only while the transfer lock is held."""
 
     actor_session_id: str
     ownership_epoch: int
@@ -186,7 +177,7 @@ def _fsync_parent(path: Path) -> bool:
 
 
 def durable_write_json(path: Path, payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Atomically replace JSON, fsync it, and verify the exact persisted digest."""
+    """Atomic JSON replace with fsync and digest readback."""
 
     materialized = dict(payload)
     durability = dict(materialized.get("durability", {}))
@@ -296,8 +287,6 @@ def _transfer_id(revision: int, nonce: str) -> str:
 
 
 def derive_transfer_id(revision: int, nonce: str) -> str:
-    """Return the public deterministic identity used by capsules and journals."""
-
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
         raise TransferError("invalid_identity", "capsule revision must be positive")
     return _transfer_id(revision, _validate_nonce(nonce))
@@ -310,8 +299,6 @@ def _record_path(paths: TransferPaths, transfer_id: str) -> Path:
 
 
 def _validate_capsule_path(paths: TransferPaths, capsule_path: str) -> str:
-    """Return a canonical capsule path contained in the source session root."""
-
     supplied = Path(_require_text("capsule path", capsule_path)).expanduser()
     try:
         metadata = supplied.lstat()
@@ -1081,8 +1068,6 @@ def _validate_tombstone_receipt(
     tombstone: Mapping[str, Any],
     record: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Recompute the exact receipt from the retained verified transfer record."""
-
     _validate_record(paths, record)
     verification = record.get("verification")
     if not isinstance(verification, dict) or verification.get("result") != "verified":
@@ -1693,11 +1678,9 @@ def authority_transaction(
     actor_session_id: str,
     source_session_id: str,
 ) -> Iterator[WriteFence]:
-    """Hold the global transfer lock across an authorized state/filesystem write.
+    """Hold the transfer lock for one authorized write.
 
-    Callers must perform the complete write before leaving this context.  A
-    standalone ``guard-write`` result is advisory and cannot substitute for
-    this epoch-fenced transaction because acknowledgement may race it.
+    Finish the write before exit. ``guard-write`` alone is not enough; ack can race it.
     """
 
     actor_session_id = _require_text("actor session ID", actor_session_id)
@@ -1808,8 +1791,6 @@ def _hook_session(payload: Mapping[str, Any]) -> str | None:
 
 
 def discover_source_for_actor(repo: Path, actor_session_id: str) -> str | None:
-    """Find an actor's source from ownership, active records, or durable receipts."""
-
     root = state_root(repo)
     matches: set[str] = set()
     try:

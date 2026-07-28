@@ -1,4 +1,4 @@
-# Fresh Handoff Capsule v2
+# Relay Capsule v2
 
 capsule_version: 2
 resume_ready: true

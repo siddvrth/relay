@@ -13,7 +13,7 @@ Defaults are independent:
 
 - capsule: at most 4096 UTF-8 bytes
 - transported continuation prompt: at most 1024 UTF-8 bytes
-- automatic threshold policy: `0.30` used context when the host supplies compatible telemetry
+- automatic threshold policy: `0.30` used context when compatible host telemetry is available, otherwise a bounded `transcript_path` token-count fallback
 
 Byte limits are deterministic hard ceilings. The flags may select smaller limits for testing or stricter local policy, but values above 4096/1024 are rejected before capsule, pointer, or delivery state is written; hooks fail open without injecting a continuation prompt. Byte counts and `(bytes+3)//4` proxies are storage/transport diagnostics; not evidence of token or cost savings.
 
@@ -37,7 +37,7 @@ The configurable `0.30` threshold is a conservative safety margin, not a proven 
 3. If compatible telemetry is absent, `PreToolUse` reads only the final 256 KiB of `transcript_path` and uses the latest `last_token_usage.input_tokens / model_context_window`.
 4. If the transcript is missing, malformed, partial, or schema-changed, fail open.
 5. On every `PreCompact`, advance the session revision even when durable state is unchanged, but do not claim that this fallback launches a task.
-5. A manual or explicitly forced checkpoint can run at any time.
+6. A manual or explicitly forced checkpoint can run at any time.
 
 ## Required Resume Kernel
 

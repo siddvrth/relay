@@ -1,8 +1,83 @@
 # Relay
 
-Relay is a Codex plugin for long-running work. Its `relay` skill writes bounded, evidence-backed session revisions so a clean task can resume without the old transcript or a chain of earlier checkpoints.
+Relay is a Codex plugin for long-running Goal Mode work. Its `relay` skill serializes the current working state into a bounded, self-contained capsule so a clean task can resume without the old transcript.
 
-The plugin and bundled skill are both named `relay`.
+Generic handoff tools transfer one session into another. Relay is automatic, verified, repeatable clean-context rotation for persistent Codex goals.
+
+The product, plugin, and skill are all named `relay`.
+
+### `/relay` vs `/compact`
+
+`/compact` compresses the conversation. Relay carries forward verified working state into a clean context.
+
+Official Codex `/compact`:
+
+- summarizes the existing chat to free context
+- retains critical details
+- continues from the compacted context
+
+The CLI `/compact` command is manual. OpenAI's Responses API also supports automatic server-side compaction. Neither makes `/compact` wrong; Relay solves a different problem.
+
+Relay:
+
+- captures explicit current working state rather than trying to preserve the conversation as conversation
+- uses a bounded self-contained capsule
+- creates a genuinely clean task instead of remaining in the existing chat context
+- rechecks the live repository and goal
+- verifies exact capsule identity/SHA/revision/transfer
+- carries one exact next action and exact resume validation
+- transfers write ownership only after acknowledgement
+- automatically repeats during long Goal Mode work
+
+| | `/compact` | `/relay` |
+| --- | --- | --- |
+| Primary strategy | Summarize existing chat | Serialize current working state |
+| Continues in | Compacted current chat | New clean task |
+| Carries | Key conversation state/reasoning | Bounded explicit task state |
+| Repository revalidation | Not Relay's explicit contract | Required |
+| Exact next action/validation | Not guaranteed as typed fields | Required |
+| Goal Mode rotation | Same-chat continuation | Designed to repeat across clean tasks |
+| Best fit | Keep a conversation going | Long autonomous implementation goals |
+
+Relay does not claim empirically higher quality, lower token use, or lower cost than `/compact`. Those comparisons have not been proven.
+
+### Why Relay rotates early
+
+Long-context quality does not have to decline smoothly. Published work on Qwen2.5-7B reports a cliff-like transition rather than a gentle slope ([Intelligence Degradation in Long-Context LLMs](https://arxiv.org/abs/2601.15300), arXiv:2601.15300):
+
+- performance stays comparatively strong before a critical region
+- that region appears around 40–50% of the model's maximum context
+- reported F1 drops from about 0.55–0.56 to ~0.30 there (~45.5% degradation)
+
+Conceptual sketch based on that Qwen2.5-7B result — not a measured Codex or GPT-5.6 curve:
+
+```text
+quality
+  ^
+  |  ──────────────────┐
+  |                    │
+  |                    └────────
+  |
+  +--------------------------------> context used
+       30%        40%   50%
+        ^
+     Relay default
+                  <--->
+             observed cliff region
+             in Qwen2.5-7B study
+```
+
+Relay's default `0.30` threshold is intentionally before that published 40–50% region, leaving safety margin before a potentially nonlinear degradation regime.
+
+Important limits:
+
+- `0.30` is configurable
+- `0.30` is not proven optimal for GPT-5.6 or Codex
+- the Qwen paper motivates conservative early rotation; it does not establish Codex's exact threshold
+- “cliff-like” / “jagged” describes the observed nonlinear transition, not a universal law for every model
+- the paper's “30% performance degradation” criterion is a different quantity from Relay's “30% context used” trigger
+
+Host measurement uses `last_token_usage.input_tokens / model_context_window`. Compatible hook telemetry is preferred; when it is absent, Relay reads only a bounded tail of the documented `transcript_path`. Missing or changed transcript fields fail open.
 
 ## Contract At A Glance
 
@@ -18,9 +93,7 @@ The plugin and bundled skill are both named `relay`.
 | Dependencies | Python standard library plus small Bash wrappers |
 | Hosts | Codex App and Codex CLI/OMX |
 
-The `0.30` policy is a conservative configurable safety margin, not a proven optimum for GPT-5.6 or Codex. It is motivated by published Qwen2.5-7B evidence that reports a 40–50% long-context degradation region ([arXiv:2601.15300](https://arxiv.org/abs/2601.15300)). Relay first accepts compatible hook telemetry; when it is absent, it reads only a bounded tail of the documented `transcript_path` and uses the latest `last_token_usage.input_tokens` divided by that record's `model_context_window`. Because transcript JSONL is explicitly not a stable hook interface, missing or changed fields fail open.
-
-Timing evaluation uses six separate non-claim conditions: no proactive handoff, `0.30`, `0.50`, `0.70`, `PreCompact`-only, and milestone. No threshold is proven optimal, and missing telemetry cannot support a threshold claim. The 4096/1024-byte storage and transport budgets do not determine timing.
+Timing evaluation uses six separate non-claim conditions: no proactive handoff, `0.30`, `0.50`, `0.70`, `PreCompact`-only, and milestone. No threshold is proven optimal. The 4096/1024-byte storage and transport budgets do not determine timing.
 
 ## What A Ready Capsule Preserves
 
@@ -43,6 +116,14 @@ Revision refresh and prompt delivery are intentionally separate. State changes c
 
 During `PreToolUse`, a ready handoff adds a short model-visible launch instruction. Codex App then records launch intent, creates exactly one clean local task with the existing bounded prompt, binds the returned task id, and waits for destination verification and acknowledgement before the source becomes read-only. Production handoffs do not use `fork_thread`, because forks inherit completed conversation history. `PreCompact` remains a last-resort checkpoint and does not claim to launch a task.
 
+The clean-task loop is designed to repeat:
+
+```text
+session A -> ready revision and one delivery -> session B
+session B -> newer ready revision and one delivery -> session C
+session C -> complete, or repeat
+```
+
 ## Repository Contents
 
 - `.codex-plugin/plugin.json`: frozen plugin identity and install metadata
@@ -50,17 +131,17 @@ During `PreToolUse`, a ready handoff adds a short model-visible launch instructi
 - `skills/relay/`: canonical skill, scripts, reference, and examples
 - `hooks/`: default plugin lifecycle hooks
 - `codex/`: portable Codex CLI/OMX hook adapter
-- `install.sh`: compatibility installer for repo-local `.agents` and workflow copies
+- `install.sh`: repo-local `.agents` and workflow installer
 - `docs/`: installation, lifecycle, architecture, integration, evidence, and release guidance
-- `artifacts/`: sanitized samples and historical evidence only
+- `artifacts/`: sanitized samples and optional future evaluation evidence
 
 Per [Codex plugin documentation](https://learn.chatgpt.com/docs/build-plugins), the default `hooks/hooks.json` is discovered without an explicit manifest field. Plugin command hooks require a one-time trust review. Use `/hooks` for that review in Codex CLI; Codex App uses its own plugin-hook trust prompt. After trust, ordinary Goal Mode operation is automatic.
 
 ## Quickstart
 
 ```bash
-git clone https://github.com/siddvrth/fresh-handoff.git
-cd fresh-handoff
+git clone https://github.com/siddvrth/relay.git
+cd relay
 bash validate.sh
 ```
 
@@ -71,9 +152,7 @@ bash install.sh /absolute/path/to/target-repository
 bash audit_install.sh /absolute/path/to/target-repository
 ```
 
-The installer creates `.agents/skills/relay/` and `scripts/workflow/relay_hook.sh`. Runtime state stays untracked under `.omx/state/relay/`.
-
-When upgrading from the legacy `session-continuity` skill, canonical skill and hook surfaces are fully staged and verified first. One lock-scoped transaction then swaps both canonical surfaces, publishes any verified copy-on-write state import, and archives the active legacy skill. Any failure restores every prior live surface. Legacy runtime bytes and archived skill bytes remain unchanged, but the legacy writer is no longer active, so installed callers cannot bypass the canonical 4096/1024-byte budgets.
+The installer creates `.agents/skills/relay/` and `scripts/workflow/relay_hook.sh`. Runtime state stays untracked under `.omx/state/relay/`. Canonical skill and hook surfaces are fully staged and verified first. One lock-scoped transaction then swaps both surfaces; any failure restores every prior live surface. Reinstall is idempotent and preserves source/installed parity.
 
 See [examples](skills/relay/examples.md) for a full ready-kernel seed. Incomplete seed commands are intentionally non-ready.
 
@@ -90,9 +169,9 @@ bash validate.sh
 
 The release process also builds and extracts the exact archive into a temporary consumer repository, audits the install, runs the completion gate, and verifies the Codex App handoff contract. `scripts/check_release_readiness.py` separately requires a clean committed release checkout.
 
-Static byte/fidelity checks and token-efficiency evidence are separate. Capsule bytes, prompt bytes, and `(bytes+3)//4` proxies are storage/transport diagnostics; not evidence of token or cost savings. A historical 20-pair pre-v2 clean-versus-fork study showed context isolation but did not show lower goal-token use or cost. It is retained as negative baseline evidence, not proof about v2.
+Static byte/fidelity checks and token-efficiency evidence are separate. Capsule bytes, prompt bytes, and `(bytes+3)//4` proxies are storage/transport diagnostics; not evidence of token or cost savings.
 
-Do not claim token or cost improvement until a preregistered v2 study has at least 20 paired runs with one unique task ID per pair, every candidate passed and ready, task-level output-quality non-inferiority, positive median goal-token savings, and the exact sign-test result. Release validation also binds four distinct preregistration paths and hashes, post-freeze run timestamps, repository origin, real control-to-candidate-to-release ancestry, and a deterministic digest of the frozen shipped runtime contract with no candidate-to-release drift. Evidence may be committed after the candidate when that later commit changes evidence only. The public release remains governed by the exact four-field `.codex-plugin/release-policy.json` `experimental_non_claim` contract.
+Do not claim token or cost improvement until a preregistered study has at least 20 paired runs with one unique task ID per pair, every candidate passed and ready, task-level output-quality non-inferiority, positive median goal-token savings, and the exact sign-test result. Release validation also binds four distinct preregistration paths and hashes, post-freeze run timestamps, repository origin, real control-to-candidate-to-release ancestry, and a deterministic digest of the frozen shipped runtime contract with no candidate-to-release drift. Evidence may be committed after the candidate when that later commit changes evidence only. The public release remains governed by the exact four-field `.codex-plugin/release-policy.json` `experimental_non_claim` contract.
 
 ## Documentation
 

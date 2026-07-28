@@ -4,7 +4,7 @@ set -euo pipefail
 PKG="$(cd "$(dirname "$0")" && pwd)"
 REPO="${1:-$(cd "$PKG/../.." && pwd)}"
 SKILL="$PKG/skills/relay/scripts"
-SMOKE_REPO="${TMPDIR:-/tmp}/checkpoint and continue smoke $$"
+SMOKE_REPO="${TMPDIR:-/tmp}/relay smoke $$"
 
 echo "=== relay validate ==="
 PYCACHE="${TMPDIR:-/tmp}/relay-pycache-$$"

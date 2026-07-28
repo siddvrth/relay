@@ -1570,7 +1570,7 @@ class HostileTransferAcceptanceTests(unittest.TestCase):
             )
             before_failure = self._tree_snapshot(finalize_repo)
             finalize_env = os.environ.copy()
-            finalize_env["RELAY_INSTALL_FAULT"] = "combined_finalize"
+            finalize_env["RELAY_INSTALL_FAULT"] = "canonical_finalize"
             finalized_failure = subprocess.run(
                 ["bash", str(INSTALL_SCRIPT), str(finalize_repo)],
                 text=True,

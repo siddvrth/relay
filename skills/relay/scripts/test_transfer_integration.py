@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused writer/context/hook integration tests for transfer authority."""
+"""Writer/context/hook integration tests for transfer control."""
 
 from __future__ import annotations
 

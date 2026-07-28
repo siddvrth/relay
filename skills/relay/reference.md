@@ -181,19 +181,15 @@ UserPromptSubmit = ["bash scripts/workflow/relay_hook.sh UserPromptSubmit"]
 
 The stub reads one hook JSON object from stdin, calls the installed orchestrator, and writes only the allowed official response.
 
-## Legacy Migration
+## Installation
 
-`install.sh` treats `.agents/skills/session-continuity` and `.omx/state/session-continuity` as legacy:
+`install.sh` publishes Relay only:
 
-- the active legacy skill, including its unbounded writer, is moved outside `.agents/skills/`; installed callers use only the bounded canonical writer
-- original legacy runtime bytes remain unchanged
-- only the newest valid legacy checkpoint is copied, with checksum/provenance, when no newer canonical checkpoint exists
-- a newer canonical checkpoint wins
 - canonical skill and hook surfaces are staged, compiled/syntax-checked, and compared before any live change
-- one install lock covers both canonical swaps, verified migration publication, and legacy-skill archival
-- any failure in that transaction restores the prior canonical skill, hook, imported state, and active legacy skill
+- one install lock covers both canonical swaps
+- any failure in that transaction restores the prior canonical skill and hook
 - repeated install is idempotent
-- `audit_install.sh` fails while an active legacy skill conflict remains
+- `audit_install.sh` fails on source/installed drift
 
 ## Empirical Gate
 
@@ -211,7 +207,6 @@ Release binding resolves the declared control and candidate IDs as real commits,
 | New revision but no prompt | Session delivery cooldown is active, including after unchanged `PreCompact` | Resume only from an actually delivered exact prompt, or wait for a later eligible delivery |
 | Wrong session or stale revision | Convenience pointer or old prompt was used | Use the prompt-specified path/SHA/source/transfer/goal/revision/nonce identity and session pointer |
 | Hook appears installed but never runs | Definition is untrusted or not loaded | Open `/hooks`, review the source/hash, and trust it |
-| Active legacy conflict | `.agents/skills/session-continuity` still exists | Run `repair_active_install.sh`, then `audit_install.sh` |
 | Fresh task is not created | Codex App thread tools are unavailable | Return the exact capsule pointer and prompt without claiming creation |
 | Destination cannot write | Transfer is unacknowledged or source stop is unresolved | Verify/acknowledge the exact identity, then request/record a supported stop result and wait for `status.can_continue:true` |
 | Source cannot be interrupted | Host has no trustworthy target-stop adapter | Keep it read-only, persist `termination_pending`, and never claim closure or quiescence without adapter evidence |

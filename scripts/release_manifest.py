@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Parse the independent Relay release manifest boundary."""
+"""Parse the Relay release manifest."""
 
 from __future__ import annotations
 

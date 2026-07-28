@@ -32,16 +32,14 @@
 
 The configurable `0.30` default is a conservative margin motivated by Qwen2.5-7B evidence of a 40–50% degradation region, not a proven optimum for GPT-5.6 or Codex.
 
-## Migration And Installation
+## Installation
 
 | Requirement | Required behavior | Evidence |
 | --- | --- | --- |
-| Preserve legacy bytes | `.omx/state/session-continuity` is never mutated | Before/after checksum tests |
-| Copy-on-write import | Newest valid legacy checkpoint is copied with provenance/checksum only when no newer canonical checkpoint exists | Migration tests |
-| Canonical wins | Newer canonical state is never replaced by legacy state | Ordering tests |
-| One locked publish transaction | Canonical skill/hook swap, verified migration publication, and legacy-skill archival either all commit or all restore their prior live surfaces | Combined fault-injection/retry tests |
-| Deactivate unbounded legacy writer | `.agents/skills/session-continuity` is archived outside the active namespace; installed calls use the canonical 4096/1024-bounded writer; audit fails while legacy remains active | Installed-path budget and temporary lifecycle tests |
+| Locked canonical swap | Canonical skill/hook swap either commits or restores prior live surfaces | Fault-injection/retry tests |
+| Installed budget enforcement | Installed calls use the canonical 4096/1024-bounded writer | Installed-path budget tests |
 | Canonical fresh-install seed | Installed writer accepts a ready seed with optional arrays absent, persists them as `[]`, writes only `next_action`, binds exact `resume_validation`, and delivers through both installed adapters | Fresh-install CLI and hook smoke |
+| Idempotent reinstall | Repeated install preserves source/installed parity without weakening safety | Temporary consumer install/repair/audit cycle |
 
 ## Clean-Task Resume
 
@@ -51,7 +49,7 @@ A production clean task is eligible only when the result reports `resume_ready:t
 
 ## Static Gate Versus Empirical Gate
 
-Static acceptance proves byte bounds, full critical-field retention, prompt separation, readiness behavior, session isolation, migration, adapters, and installation. It cannot prove lower token use or cost.
+Static acceptance proves byte bounds, full critical-field retention, prompt separation, readiness behavior, session isolation, adapters, and installation. It cannot prove lower token use or cost.
 
 A token-efficiency claim requires a separate preregistered study with at least 20 unique tasks, one per pair. Its four distinct preregistration paths must be safe repo-relative tracked regular blobs whose hashes match candidate, release `HEAD`, and the clean current tree. Every row needs an offset-aware start strictly after `frozen_at` and within the future-skew guard. Release binding must prove matching `origin`, real control-to-candidate-to-HEAD ancestry, matching deterministic framed runtime digests, and no runtime drift after candidate; a later evidence-only commit is allowed. Pass only when:
 
@@ -62,4 +60,4 @@ A token-efficiency claim requires a separate preregistered study with at least 2
 
 Report readiness/failure rates and capsule/prompt bytes separately. Goal `tokensUsed` is narrower than complete context, transcript, billing usage, cached input, or total model consumption.
 
-The retained 20-pair clean-versus-fork dataset is historical pre-v2 evidence. It proves structural context isolation but failed the token gate; it is not evidence that v2 saves tokens or cost.
+Until a preregistered study passes those gates, preserve the experimental non-claim policy: no token-efficiency claim, no cost-savings claim, and no claim that Relay beats `/compact` on quality.

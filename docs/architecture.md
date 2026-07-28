@@ -87,13 +87,13 @@ V3 aggregate telemetry spans the source-before-handoff, handoff-generation, dest
 
 ## Failure Model
 
-- Before an acknowledgement boundary exists, malformed hook/checkpoint input retains the legacy fail-open behavior. Durable revocation or destination ownership makes missing/corrupt authority handling fail closed for affected writers.
+- Before an acknowledgement boundary exists, malformed hook/checkpoint input retains the fail-open behavior. Durable revocation or destination ownership makes missing/corrupt authority handling fail closed for affected writers.
 - Readiness fails closed: a non-ready capsule never authorizes autonomous switching.
-- Install audits and validation fail closed on source drift or an active legacy skill conflict.
+- Install audits and validation fail closed on source/installed drift.
 - Thread-tool absence returns exact continuation data without pretending a clean task exists.
 - `fork_thread` is excluded from production handoffs because it inherits completed conversation history.
 - Exact acknowledgement makes the destination sole owner before stop work; hooks are defense-in-depth and not an OS write ACL.
 
-## Legacy Boundary
+## Install Boundary
 
-`skills/relay/` is canonical. `.agents/skills/session-continuity` and `.omx/state/session-continuity` are legacy. Canonical copies are fully staged and verified before any live change. Under one install lock, a single rollback transaction swaps the canonical skill and hook, publishes any verified copy-on-write import, and archives the active legacy skill. Failure restores all prior live surfaces. Original legacy bytes remain untouched; archived legacy writer bytes are retained but inactive, so they cannot bypass canonical budgets.
+`skills/relay/` is canonical. Canonical copies are fully staged and verified before any live change. Under one install lock, a single rollback transaction swaps the canonical skill and hook. Failure restores all prior live surfaces.

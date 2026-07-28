@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Parse Relay's exact public release file contract."""
+"""Parse the public release file allowlist."""
 
 from __future__ import annotations
 
@@ -17,8 +17,6 @@ FORBIDDEN_SUFFIXES: Final = (".jsonl", ".log", ".pyc", ".pyo", ".temp", ".tmp", 
 
 @dataclass(frozen=True, slots=True)
 class ReleaseContract:
-    """Validated exact payload membership."""
-
     paths: tuple[str, ...]
 
 

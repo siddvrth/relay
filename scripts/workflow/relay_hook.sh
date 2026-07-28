@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Repo-local OMX / Codex hook entry for checkpoint and continue.
+# Repo-local OMX / Codex hook entry for relay.
 # Wire from Codex config hooks (UserPromptSubmit, Stop, PreCompact) - see reference.md.
 set -euo pipefail
 

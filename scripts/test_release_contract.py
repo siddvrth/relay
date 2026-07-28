@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract tests for Relay's exact public release allowlist."""
+"""Tests for the public release file allowlist."""
 
 from __future__ import annotations
 

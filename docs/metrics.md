@@ -22,7 +22,7 @@ Static checks cover:
 5. prompt separation and metadata-only pointers
 6. session-scoped locks, revision refresh, and delivery dedup
 7. event-specific official hook envelopes
-8. source/installed parity, bounded installed writer, and transactional legacy migration
+8. source/installed parity, bounded installed writer, and locked canonical install swap
 9. temporary install, audit, repair, re-audit, and completion gate
 
 Capsule bytes, prompt bytes, fixed duplicated-semantic marker counts, and `(bytes+3)//4` proxies may appear in deterministic reports. They are storage/transport diagnostics; not evidence of token or cost savings. They do not gate readiness or release.
@@ -96,25 +96,9 @@ Static V3 observability reports capsule/prompt byte distributions; readiness and
 
 Even passing evidence does not silently change release claims. `.codex-plugin/release-policy.json` must remain the exact four-field `experimental_non_claim` document until a separately approved release changes that public contract.
 
-## Historical Pre-V2 Baseline
+## Future Evaluation Evidence
 
-The retained 2026-07-11 clean-versus-fork dataset contains 20 historical pre-v2 pairs. Clean tasks structurally shed inherited turns, but they used fewer goal tokens in only 8 of 20 pairs. The paired median favored forks by 103.5 tokens and the exact two-sided sign-test p-value was about 0.5034.
-
-That result failed the token-efficiency gate. It is useful negative baseline evidence about context isolation and the weakness of byte/turn proxies; it does not measure or validate the V2 self-contained kernel or the V3 acknowledgement-gated chain.
-
-The historical report remains reproducible with caller-supplied pricing:
-
-```bash
-python3 skills/relay/scripts/goal_telemetry_report.py \
-  --clean-tokens 1824,1863,1863,1826,2162,4823,3581,10931,3733,4760,6078,4870,3726,3176,10531,3690,21704,6485,5709,3809 \
-  --fork-tokens 2017,2038,1960,2006,2033,5506,3659,7879,3367,4841,6000,4801,3300,2926,6164,3485,4590,4569,4422,5254 \
-  --model <model-id> \
-  --cached-input-rate <current-rate-per-million> \
-  --input-rate <current-rate-per-million> \
-  --output-rate <current-rate-per-million>
-```
-
-Recheck current official rates before any sensitivity report. Never describe those scenarios as a Codex bill.
+Telemetry tooling remains available for future preregistered Relay studies under `artifacts/metrics/`. Until those gates pass, preserve the experimental non-claim policy: no token-efficiency claim, no cost-savings claim, and no claim that Relay beats `/compact` on quality.
 
 ## Experimental Timing Conditions
 

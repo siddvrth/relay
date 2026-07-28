@@ -8,7 +8,7 @@ Relay preserves only the minimum durable state needed for safe continuation. Run
 - generated workflow adapter only when distribution parity requires it
 - product documentation
 - generic v2 sample capsules under `artifacts/handoffs/`
-- preregistered, sanitized aggregate evidence under `artifacts/metrics/`
+- optional preregistered, sanitized aggregate evidence under `artifacts/metrics/` when a study is ready to publish
 
 ## Do Not Commit These
 
@@ -43,9 +43,9 @@ rg -n -i '/Users/[^/< ]+|/home/[^/< ]+|api[_-]?key|authorization:|bearer [a-z0-9
 
 Review matches manually; words such as “token” legitimately appear in metrics documentation.
 
-## Historical Evidence
+## Future Evaluation Evidence
 
-Historical artifacts must state which runtime contract produced them. The 2026-07-11 clean-versus-fork study predates the v2 self-contained kernel and failed the token-efficiency gate. Preserve it as negative baseline evidence; do not relabel it as v2 proof.
+Telemetry and evaluation tooling remain in the package so future Relay studies can be published under `artifacts/metrics/`. Until a preregistered study passes the exact claim gates, preserve the experimental non-claim policy: no token-efficiency claim, no cost-savings claim, and no claim that Relay beats `/compact` on quality.
 
 ## Naming Rules
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independently verify a Relay release archive and sibling manifest."""
+"""Verify a Relay release archive against its sibling manifest."""
 
 from __future__ import annotations
 

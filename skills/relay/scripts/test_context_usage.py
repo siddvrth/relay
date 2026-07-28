@@ -84,7 +84,6 @@ class ContextUsageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
     def test_uses_latest_rendered_input_over_cumulative_spend(self) -> None:
-        # Given
         with tempfile.TemporaryDirectory() as temp:
             transcript = Path(temp) / "rollout.jsonl"
             transcript.write_text(
@@ -98,16 +97,13 @@ class ContextUsageTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            # When
             ratio = context_handoff.extract_context_used(
                 {"transcript_path": str(transcript)}
             )
 
-            # Then
             self.assertEqual(ratio, 0.30)
 
     def test_reads_only_a_bounded_tail_near_transcript_end(self) -> None:
-        # Given
         with tempfile.TemporaryDirectory() as temp:
             transcript = Path(temp) / "rollout.jsonl"
             transcript.write_text(
@@ -118,12 +114,10 @@ class ContextUsageTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            # When
             ratio = context_handoff.extract_context_used(
                 {"transcript_path": str(transcript)}
             )
 
-            # Then
             self.assertEqual(ratio, 0.31)
 
     def test_fails_open_for_missing_malformed_or_changed_usage(self) -> None:
@@ -160,12 +154,10 @@ class ContextUsageTests(unittest.TestCase):
                     self.assertIsNone(context_handoff.extract_context_used(payload))
 
     def test_direct_hook_telemetry_precedes_transcript_fallback(self) -> None:
-        # Given
         with tempfile.TemporaryDirectory() as temp:
             transcript = Path(temp) / "rollout.jsonl"
             transcript.write_text(token_count(90, 100, 90) + "\n", encoding="utf-8")
 
-            # When
             ratio = context_handoff.extract_context_used(
                 {
                     "context_usage_percent": 20,
@@ -173,7 +165,6 @@ class ContextUsageTests(unittest.TestCase):
                 }
             )
 
-            # Then
             self.assertEqual(ratio, 0.20)
 
     def test_pretool_threshold_is_exact_and_proactive(self) -> None:
@@ -183,7 +174,6 @@ class ContextUsageTests(unittest.TestCase):
             ("above", 30.1, True),
         ):
             with self.subTest(label=label), tempfile.TemporaryDirectory() as temp:
-                # Given
                 repo = Path(temp)
                 session_id = f"pretool-{label}"
                 self.seed_ready_state(repo, session_id)
@@ -196,7 +186,6 @@ class ContextUsageTests(unittest.TestCase):
                     }
                 )
 
-                # When
                 result = subprocess.run(
                     [
                         sys.executable,
@@ -217,7 +206,6 @@ class ContextUsageTests(unittest.TestCase):
                     text=True,
                 )
 
-                # Then
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 response = json.loads(result.stdout)
                 specific = response.get("hookSpecificOutput")

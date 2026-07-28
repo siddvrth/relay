@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and summarize exact goal-period paired handoff telemetry."""
+"""Validate and summarize paired goal-period handoff telemetry."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from typing import Any, Mapping, Sequence
 
 
 V2_SCHEMA_VERSION = 2
-V2_STUDY_TYPE = "token_efficient_fresh_handoff_v2"
+V2_STUDY_TYPE = "token_efficient_relay_v2"
 V2_TELEMETRY_SCOPE = "exact_goal_period_tokensUsed"
 CONTROL_CONDITION = "current_canonical"
 CANDIDATE_CONDITION = "candidate"
@@ -29,7 +29,7 @@ RUBRIC_WEIGHTS: dict[str, float] = {
 }
 OUTCOMES = {"passed", "failed", "blocked"}
 V3_SCHEMA_VERSION = 3
-V3_STUDY_TYPE = "token_efficient_fresh_handoff_v3"
+V3_STUDY_TYPE = "token_efficient_relay_v3"
 
 DOCUMENT_KEYS = {
     "schema_version",
@@ -93,7 +93,7 @@ def token_cost(tokens: float, rate_per_million: float) -> float:
 
 
 def two_sided_sign_test_p_value(positive: int, negative: int) -> float:
-    """Return an exact two-sided binomial sign-test p-value, excluding ties."""
+    """Two-sided binomial sign-test p-value; ties excluded."""
     trials = positive + negative
     if trials == 0:
         return 1.0
@@ -161,7 +161,7 @@ def _valid_repo_relative_path(value: Any) -> bool:
 
 
 def validate_study_document(document: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate the frozen v2 evidence schema and return paired row indexes."""
+    """Check the v2 study schema and return paired row indexes."""
     if not isinstance(document, Mapping):
         raise ValueError("v2 study document must be an object")
     _require_exact_keys(document, DOCUMENT_KEYS, "v2 study document")
@@ -520,8 +520,7 @@ def build_report(
 ) -> dict[str, Any]:
     """Build the historical clean/fork aggregate report.
 
-    This remains reproducible for the archived study, but aggregate token lists do
-    not contain the v2 readiness, outcome, byte, or blinded rubric rows.
+    Token lists alone omit v2 readiness, outcome, byte, and rubric rows.
     """
     if len(clean_tokens) != len(fork_tokens):
         raise ValueError("clean and fork samples must have the same length")

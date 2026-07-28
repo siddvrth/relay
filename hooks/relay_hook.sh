@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Plugin-bundled Codex hook entry for checkpoint and continue.
+# Plugin-bundled Codex hook entry for relay.
 set -euo pipefail
 
 ROOT="${ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"

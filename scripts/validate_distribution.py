@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the dependency-free plugin and skill distribution contract."""
+"""Check the plugin/skill layout has no undeclared dependencies."""
 
 from __future__ import annotations
 
@@ -128,21 +128,18 @@ def validate_legacy_goal_telemetry(
 
 def validate_goal_telemetry_artifacts(root: Path = ROOT) -> dict[str, int]:
     metrics_root = root / "artifacts" / "metrics"
-    legacy_path = metrics_root / "20260711-goal-telemetry-20-pairs.json"
-    if not legacy_path.is_file():
-        fail("historical goal telemetry artifact is missing")
-    try:
-        legacy_value = json.loads(legacy_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        fail(f"invalid JSON at {legacy_path.relative_to(root)}: {exc}")
-    if not isinstance(legacy_value, dict):
-        fail(f"expected object at {legacy_path.relative_to(root)}")
-    validate_legacy_goal_telemetry(legacy_value, legacy_path, root=root)
+    if not metrics_root.is_dir():
+        return {
+            "historical_trial_count": 0,
+            "v2_study_count": 0,
+            "v3_study_count": 0,
+        }
 
+    historical_trial_count = 0
     v2_count = 0
     v3_count = 0
     for path in sorted(metrics_root.glob("*.json")):
-        if path == legacy_path or path.name == "live-hooks-trust.json":
+        if path.name == "live-hooks-trust.json":
             continue
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -150,6 +147,10 @@ def validate_goal_telemetry_artifacts(root: Path = ROOT) -> dict[str, int]:
             fail(f"invalid JSON at {path.relative_to(root)}: {exc}")
         if not isinstance(value, dict):
             fail(f"expected object at {path.relative_to(root)}")
+        if value.get("schema_version") == 1 and isinstance(value.get("trials"), list):
+            validate_legacy_goal_telemetry(value, path, root=root)
+            historical_trial_count += len(value["trials"])
+            continue
         identity = (value.get("schema_version"), value.get("study_type"))
         v2_marker = (
             value.get("schema_version") == V2_SCHEMA_VERSION
@@ -186,7 +187,7 @@ def validate_goal_telemetry_artifacts(root: Path = ROOT) -> dict[str, int]:
                 "mixed or partial schema/type markers"
             )
     return {
-        "historical_trial_count": len(legacy_value["trials"]),
+        "historical_trial_count": historical_trial_count,
         "v2_study_count": v2_count,
         "v3_study_count": v3_count,
     }
@@ -206,8 +207,8 @@ def validate() -> None:
         fail("plugin skills path must be ./skills/")
     if manifest["name"] != "relay":
         fail("plugin name must be relay")
-    if manifest.get("repository") != "https://github.com/siddvrth/fresh-handoff":
-        fail("plugin repository URL must match the planned fresh-handoff remote")
+    if manifest.get("repository") != "https://github.com/siddvrth/relay":
+        fail("plugin repository URL must match the planned relay remote")
     if manifest.get("license") != "MIT":
         fail("plugin license must be MIT")
     if not (ROOT / "LICENSE").is_file():

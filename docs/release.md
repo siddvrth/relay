@@ -4,7 +4,7 @@ Relay remains experimental, but every public release must be reproducible and mu
 
 ## Frozen Identities
 
-- plugin and repository: `fresh-handoff`
+- product, plugin, and repository: `relay`
 - bundled skill: `relay`
 
 Do not rename these during routine contract or documentation work.
@@ -95,7 +95,7 @@ Use `0.x.y` while Codex hook and clean-task behavior are experimental.
 
 8. In Codex CLI, open `/hooks`; prove `UserPromptSubmit`, `PreToolUse`, `PreCompact`, and `Stop` are loaded and the current hashes are reviewed/trusted. Exercise delivery plus pre/post-ack write denial with a complete session kernel. Any future live evidence must use a fresh parseable timestamp and bind the plugin version, `hooks/hooks.json` SHA-256, and all three adapter SHA-256 values. Missing, stale, or unbound live evidence blocks release acceptance.
 9. Run `python3 scripts/check_release_readiness.py` from the intended clean, committed release checkout. This is the only listed gate that requires clean git/release metadata.
-10. Confirm one locked install transaction swaps both canonical surfaces, imports legacy state only when appropriate, and archives the active legacy writer; inject a failure and prove every prior live surface is restored. Re-audit cleanly and verify the installed canonical writer enforces 4096/1024-byte budgets.
+10. Confirm one locked install transaction swaps both canonical surfaces; inject a failure and prove every prior live surface is restored. Re-audit cleanly and verify the installed canonical writer enforces 4096/1024-byte budgets.
 11. Confirm official event outputs use distinct allowed shapes and `PreToolUse` default-denies unknown/write-capable tools for revoked or control-only actors.
 12. Confirm `transfer_control.py` is present in canonical and freshly installed runtime copies and participates in the frozen runtime digest.
 13. Confirm release copy describes the `0.30` threshold as experimental and host-dependent.
@@ -110,13 +110,13 @@ Separate the release report into:
 
 - static 4096/1024 byte and critical-field fidelity evidence
 - hook load/trust evidence
-- session/revision/delivery and migration evidence
+- session/revision/delivery and install evidence
 - V2 prior-schema evidence and strict V3 aggregate-chain evidence, when available
 - output quality and readiness/failure rates
 - acknowledgement/source-stop outcomes and latencies, post-acknowledgement activity, duplicate/conflict/retry/pending/intervention observability, and continuation-quality checks
 - byte metrics, which are not token proxies
 
-The historical 20-pair clean-versus-fork study is pre-V2 negative baseline evidence. It may support the structural observation that clean tasks shed inherited completed turns, but it does not satisfy the V2 or V3 token/cost claim gates.
+Until a preregistered study passes the V3 claim gates, preserve the experimental non-claim policy. Do not claim token or cost improvement, and do not claim that Relay beats `/compact` on quality.
 
 Keep only sanitized evidence under `artifacts/`. Do not commit private capsules, raw hook payloads, transcripts, secrets, or workspace-specific paths.
 

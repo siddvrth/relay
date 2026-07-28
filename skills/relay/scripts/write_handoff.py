@@ -89,8 +89,6 @@ def byte_budget_limit_error(
     capsule_budget_bytes: int,
     prompt_budget_bytes: int,
 ) -> str | None:
-    """Return the canonical hard-cap violation, if any."""
-
     if capsule_budget_bytes > MAX_CAPSULE_BUDGET_BYTES:
         return (
             "capsule byte budget cannot exceed "
@@ -484,7 +482,7 @@ def validate_structural_readiness(
         failures.append("session:mismatch")
 
     next_action = _normalized_text(state.get("next_action", ""))
-    if "checkpoint" in next_action and (
+    if ("checkpoint" in next_action or "capsule" in next_action) and (
         "next action" in next_action or "next step" in next_action
     ):
         failures.append("circular:next_action")

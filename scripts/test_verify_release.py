@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integrity and membership tests for the independent release verifier."""
+"""Integrity and membership tests for the release verifier."""
 
 from __future__ import annotations
 

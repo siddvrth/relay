@@ -6,8 +6,8 @@
     "name": "siddvrth",
     "url": "https://github.com/siddvrth"
   },
-  "homepage": "https://github.com/siddvrth/fresh-handoff#readme",
-  "repository": "https://github.com/siddvrth/fresh-handoff",
+  "homepage": "https://github.com/siddvrth/relay#readme",
+  "repository": "https://github.com/siddvrth/relay",
   "license": "MIT",
   "keywords": [
     "codex",
@@ -23,7 +23,7 @@
     "shortDescription": "Bounded clean-task handoffs for Codex",
     "longDescription": "Write a bounded session-scoped capsule, verify exact transfer identity in a clean Codex task, and acknowledge before single-writer ownership transfers without inheriting the old conversation.",
     "developerName": "siddvrth",
-    "websiteURL": "https://github.com/siddvrth/fresh-handoff",
+    "websiteURL": "https://github.com/siddvrth/relay",
     "category": "Productivity",
     "capabilities": [
       "Write",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Orchestrate revision creation and continuation delivery for handoffs."""
+"""Create revisions and deliver continuation handoffs."""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ def _append_argument(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Checkpoint-and-continue internal orchestrator."
+        description="Relay internal orchestrator."
     )
     parser.add_argument("--repo", default=".")
     parser.add_argument("--stdin-json", action="store_true")
@@ -249,9 +249,7 @@ def recently_handed_off(path: Path, dedup_seconds: int) -> bool:
 def handoff_lock(path: Path):
     if fcntl is None:
         raise RuntimeError("session handoff locking is unavailable")
-    # The lock file is created in an authority transaction before this context.
-    # Nested mutation paths acquire this session lock and then transfer authority;
-    # no path holds transfer authority while acquiring this session lock.
+    # Session lock first, then transfer lock — never the reverse.
     with path.open("r+", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
@@ -781,7 +779,7 @@ def official_hook_response(
         if internal.get("checkpoint_written"):
             return {
                 "continue": True,
-                "systemMessage": "Checkpoint-and-continue state refreshed before compaction.",
+                "systemMessage": "Relay state refreshed before compaction.",
             }
         return {"continue": True}
 
@@ -789,7 +787,7 @@ def official_hook_response(
         if internal.get("checkpoint_written"):
             return {
                 "continue": True,
-                "systemMessage": "Checkpoint-and-continue state preserved.",
+                "systemMessage": "Relay state preserved.",
             }
         return {"continue": True}
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import goal_telemetry_report as telemetry
 
 V3_SCHEMA_VERSION = 3
-V3_STUDY_TYPE = "token_efficient_fresh_handoff_v3"
+V3_STUDY_TYPE = "token_efficient_relay_v3"
 V3_TELEMETRY_SCOPE = "aggregate_source_destination_chain_tokensUsed"
 CONTINUATION_QUALITY_KEYS = {
     "next_step_correct",

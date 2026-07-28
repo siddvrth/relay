@@ -71,7 +71,6 @@ def parse_launch_context(value: str) -> LaunchEnvelope:
 
 class CodexAppHandoffTests(unittest.TestCase):
     def test_missing_host_tool_telemetry_remains_unknown(self) -> None:
-        # Given / When
         unknown = context_handoff.app_capability_guidance({})
         unsupported = context_handoff.app_capability_guidance(
             {"available_thread_tools": []},
@@ -80,26 +79,22 @@ class CodexAppHandoffTests(unittest.TestCase):
             {"available_thread_tools": ["create_thread"]},
         )
 
-        # Then
         self.assertIsNone(unknown["create_clean_task_supported"])
         self.assertFalse(unsupported["create_clean_task_supported"])
         self.assertTrue(supported["create_clean_task_supported"])
 
     def test_lifecycle_uses_one_stable_transport_key_before_and_after_create(self) -> None:
-        # Given
         transfer = {
             "session_id": "source-session",
             "transfer_id": "r1-0123456789abcdef",
         }
 
-        # When
         actions = context_handoff.lifecycle_next_actions(
             Path("/tmp/relay-app-test"),
             transfer,
             create_thread_available=True,
         )
 
-        # Then
         launch_command = actions[0]["command_argv"]
         delivered_command = actions[2]["commands_argv"][0]
         launch_key = launch_command[launch_command.index("--transport-key") + 1]
@@ -110,16 +105,13 @@ class CodexAppHandoffTests(unittest.TestCase):
         self.assertEqual(delivered_key, transfer["transfer_id"])
 
     def test_user_prompt_ready_handoff_requests_one_clean_app_task(self) -> None:
-        # Given
         internal = ready_result()
 
-        # When
         response = context_handoff.official_hook_response(
             "UserPromptSubmit",
             internal,
         )
 
-        # Then
         envelope = parse_launch_context(
             response["hookSpecificOutput"]["additionalContext"],
         )
@@ -141,13 +133,10 @@ class CodexAppHandoffTests(unittest.TestCase):
         self.assertEqual(envelope["source_stop_gate"], "destination_acknowledged")
 
     def test_pretool_ready_handoff_requests_one_clean_app_task(self) -> None:
-        # Given
         internal = ready_result()
 
-        # When
         response = context_handoff.official_hook_response("PreToolUse", internal)
 
-        # Then
         self.assertNotIn("continue", response)
         envelope = parse_launch_context(
             response["hookSpecificOutput"]["additionalContext"],
@@ -163,35 +152,29 @@ class CodexAppHandoffTests(unittest.TestCase):
         )
 
     def test_precompact_ready_handoff_only_reports_checkpoint(self) -> None:
-        # Given
         internal = ready_result()
 
-        # When
         response = context_handoff.official_hook_response("PreCompact", internal)
 
-        # Then
         self.assertEqual(
             response,
             {
                 "continue": True,
-                "systemMessage": "Checkpoint-and-continue state refreshed before compaction.",
+                "systemMessage": "Relay state refreshed before compaction.",
             },
         )
 
     def test_checkpoint_without_delivery_does_not_request_an_app_task(self) -> None:
-        # Given
         internal = ready_result()
         internal["delivery_emitted"] = False
 
-        # When
         response = context_handoff.official_hook_response("PreCompact", internal)
 
-        # Then
         self.assertEqual(
             response,
             {
                 "continue": True,
-                "systemMessage": "Checkpoint-and-continue state refreshed before compaction.",
+                "systemMessage": "Relay state refreshed before compaction.",
             },
         )
 

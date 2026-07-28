@@ -50,15 +50,8 @@ check_file() {
 check_dir "$PKG/skills/relay" "$REPO/.agents/skills/relay" "installed skill"
 check_file "$PKG/codex/relay_hook.sh" "$REPO/scripts/workflow/relay_hook.sh" "Codex hook stub"
 
-for legacy_skill in session-continuity checkpoint-and-continue; do
-  if [[ -e "$REPO/.agents/skills/$legacy_skill" || -L "$REPO/.agents/skills/$legacy_skill" ]]; then
-    echo "ACTIVE legacy skill conflict: $REPO/.agents/skills/$legacy_skill"
-    failures=$((failures + 1))
-  fi
-done
-
 if [[ -e "$REPO/.cursor/hooks/relay-gate.mjs" ]]; then
-  echo "UNSUPPORTED legacy editor hook: $REPO/.cursor/hooks/relay-gate.mjs"
+  echo "UNSUPPORTED editor hook: $REPO/.cursor/hooks/relay-gate.mjs"
   failures=$((failures + 1))
 fi
 

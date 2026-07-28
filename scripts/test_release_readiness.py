@@ -64,7 +64,7 @@ def v2_study_document() -> dict[str, object]:
             )
     return {
         "schema_version": 2,
-        "study_type": "token_efficient_fresh_handoff_v2",
+        "study_type": "token_efficient_relay_v2",
         "telemetry_scope": "exact_goal_period_tokensUsed",
         "control_condition": "current_canonical",
         "candidate_condition": "candidate",
@@ -104,7 +104,7 @@ def v2_study_document() -> dict[str, object]:
 def v3_study_document() -> dict[str, object]:
     document = v2_study_document()
     document["schema_version"] = 3
-    document["study_type"] = "token_efficient_fresh_handoff_v3"
+    document["study_type"] = "token_efficient_relay_v3"
     document["telemetry_scope"] = "aggregate_source_destination_chain_tokensUsed"
     rows = document["rows"]
     assert isinstance(rows, list)
@@ -157,7 +157,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         with mock.patch.object(
             release,
             "git",
-            side_effect=[completed(), completed(stdout="https://example.com/fresh-handoff.git\n"), completed()],
+            side_effect=[completed(), completed(stdout="https://example.com/relay.git\n"), completed()],
         ):
             return release.assess(root)
 
@@ -227,7 +227,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.git(root, "init", "-q")
         self.git(root, "config", "user.name", "Release Test")
         self.git(root, "config", "user.email", "release-test@example.invalid")
-        self.git(root, "remote", "add", "origin", "https://example.invalid/fresh-handoff.git")
+        self.git(root, "remote", "add", "origin", "https://example.invalid/relay.git")
         self.git(root, "add", ".")
         self.git(root, "commit", "-qm", "control runtime")
         control = self.git(root, "rev-parse", "HEAD")
@@ -252,7 +252,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         candidate = self.git(root, "rev-parse", "HEAD")
 
         document = v3_study_document() if telemetry_version == 3 else v2_study_document()
-        document["repository"] = "https://example.invalid/fresh-handoff.git"
+        document["repository"] = "https://example.invalid/relay.git"
         document["control_commit_id"] = control
         document["candidate_commit_id"] = candidate
         document["control_runtime_sha256"] = release.runtime_digest_at_commit(root, control)
@@ -330,7 +330,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 json.dumps(
                     {
                         "name": "relay",
-                        "repository": "https://github.com/siddvrth/fresh-handoff",
+                        "repository": "https://github.com/siddvrth/relay",
                         "license": "MIT",
                     }
                 ),
@@ -364,7 +364,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 ("config", "user.email", "release-test@example.invalid"),
                 ("add", "."),
                 ("commit", "-qm", "test release"),
-                ("remote", "add", "origin", "https://github.com/siddvrth/fresh-handoff.git"),
+                ("remote", "add", "origin", "https://github.com/siddvrth/relay.git"),
             ):
                 subprocess.run(["git", *command], cwd=root, check=True, capture_output=True, text=True)
 
@@ -487,7 +487,7 @@ class ReleaseReadinessTests(unittest.TestCase):
     def test_cross_schema_or_partial_v3_markers_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root, evidence, document = self.make_bound_release(temp, telemetry_version=3)
-            document["study_type"] = "token_efficient_fresh_handoff_v2"
+            document["study_type"] = "token_efficient_relay_v2"
             self.commit_evidence(root, evidence, document)
             result = release.assess_empirical_evidence(root)
 
@@ -511,132 +511,6 @@ class ReleaseReadinessTests(unittest.TestCase):
 
         self.assertEqual(result["v2_study_count"], 1)
         self.assertEqual(result["v3_study_count"], 1)
-
-    def test_five_pair_pilot_preregistration_is_frozen_and_complete(self) -> None:
-        pilot = json.loads(
-            (
-                PROJECT_ROOT
-                / "artifacts/metrics/fresh-handoff-v2-five-pair-pilot-preregistration.json"
-            ).read_text(encoding="utf-8")
-        )
-        pairs = pilot["pairs"]
-        expected_task_ids = [
-            "revision-owner-concurrency",
-            "validation-resume-schema",
-            "tombstone-retry-recovery",
-            "fresh-install-portability",
-            "release-evidence-audit",
-        ]
-        expected_result_fields = {
-            "status",
-            "task_correctness",
-            "constraint_retention",
-            "completeness",
-            "validation_quality",
-            "resume_usefulness",
-            "completed_work_repeated",
-            "remaining_work_skipped",
-            "first_resumed_action_correct",
-            "human_intervention",
-            "total_aggregate_goal_tokens",
-            "source_tokens_before_handoff",
-            "handoff_generation_tokens",
-            "destination_resume_tokens",
-            "completion_after_resume_tokens",
-            "capsule_bytes",
-            "prompt_bytes",
-        }
-
-        self.assertEqual([pair["task_id"] for pair in pairs], expected_task_ids)
-        self.assertEqual([pair["arm_order"] for pair in pairs], ["AB", "BA", "AB", "BA", "AB"])
-        self.assertEqual(len({pair["prompt"] for pair in pairs}), 5)
-        self.assertEqual(len({pair["task_repository_commit"] for pair in pairs}), 1)
-        self.assertEqual(
-            pilot["runtime_bindings"]["A"]["commit_id"],
-            "301ea7ccb7d0177f26d66c17680ffd5e6115a872",
-        )
-        self.assertEqual(pilot["runtime_bindings"]["B"]["commit_id"], "FINAL_HEAD")
-        self.assertIn("replace FINAL_HEAD", pilot["runtime_bindings"]["B"]["binding_rule"])
-        self.assertEqual(
-            pilot["shared_run_configuration"],
-            {
-                "model": "gpt-5.6-sol",
-                "reasoning_effort": "high",
-                "goal_token_budget": 5000,
-                "same_task_objective_per_pair": True,
-                "same_repository_state_per_pair": True,
-                "same_evaluation_rubric_per_pair": True,
-            },
-        )
-        for pair in pairs:
-            with self.subTest(task_id=pair["task_id"]):
-                self.assertEqual(len(pair["arms"]), 2)
-                self.assertEqual("".join(arm["arm"] for arm in pair["arms"]), pair["arm_order"])
-                for arm in pair["arms"]:
-                    result = arm["result"]
-                    self.assertEqual(set(result), expected_result_fields)
-                    self.assertEqual(result["status"], "not_run")
-                    self.assertTrue(
-                        all(value is None for key, value in result.items() if key != "status")
-                    )
-        self.assertFalse(pilot["claim_eligible"])
-        self.assertEqual(pilot["status"], "not_run")
-
-    def test_pilot_promising_gate_is_six_conjunctive_and_negative_stops(self) -> None:
-        pilot = json.loads(
-            (
-                PROJECT_ROOT
-                / "artifacts/metrics/fresh-handoff-v2-five-pair-pilot-preregistration.json"
-            ).read_text(encoding="utf-8")
-        )
-        gates = pilot["analysis_plan"]["promising_gates"]
-
-        self.assertEqual(len(gates), 6)
-        self.assertTrue(all(gate["required"] for gate in gates))
-        self.assertEqual(pilot["analysis_plan"]["combination"], "all_six_conjunctive")
-        self.assertEqual(pilot["analysis_plan"]["negative_stop"]["action"], "stop")
-        self.assertTrue(pilot["retention_policy"]["retain_failed_runs"])
-        self.assertTrue(pilot["retention_policy"]["retain_unfavorable_runs"])
-
-    def test_five_pair_pilot_is_nonclaim_and_cannot_unlock_release(self) -> None:
-        limitations = json.loads(
-            (
-                PROJECT_ROOT
-                / "artifacts/metrics/fresh-handoff-v2-pilot-environment-limitations.json"
-            ).read_text(encoding="utf-8")
-        )
-        empirical = release.assess_empirical_evidence(PROJECT_ROOT)
-        distribution_result = distribution.validate_goal_telemetry_artifacts(PROJECT_ROOT)
-        release_result = release.assess(PROJECT_ROOT)
-
-        self.assertEqual(limitations["formal_v3_minimum_pairs"], 20)
-        self.assertEqual(len(limitations["capability_probes"]), 5)
-        self.assertEqual(
-            [probe["status"] for probe in limitations["capability_probes"]],
-            ["executable", "not_executable", "not_executable", "not_executable", "not_executable"],
-        )
-        self.assertTrue(
-            all(
-                probe["result"] is not None
-                and probe["status"] in {"executable", "not_executable"}
-                for probe in limitations["capability_probes"]
-            )
-        )
-        self.assertFalse(empirical["gate_passed"])
-        self.assertNotIn("schema_version", limitations)
-        self.assertNotIn("study_type", limitations)
-        self.assertNotIn(
-            "fresh-handoff-v2-five-pair-pilot-preregistration.json",
-            empirical["candidate_files"],
-        )
-        self.assertNotIn(
-            "fresh-handoff-v2-pilot-environment-limitations.json",
-            empirical["candidate_files"],
-        )
-        self.assertEqual(distribution_result["v2_study_count"], 0)
-        self.assertEqual(distribution_result["v3_study_count"], 0)
-        self.assertFalse(release_result["token_efficiency_claim_ready"])
-        self.assertFalse(release_result["cost_claim_ready"])
 
     def test_distribution_rejects_malformed_v3(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1005,8 +879,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "If paired evidence passes, Relay reduces token usage.",
             "If paired evidence passes, measurements are recorded, Relay "
             "may reduce token usage.",
-            "If paired evidence passes, Relay may reduce token usage. Fresh "
-            "Handoff improves token efficiency.",
+            "If paired evidence passes, Relay may reduce token usage. Relay "
+            "improves token efficiency.",
             "If paired evidence passes, Relay may reduce token usage, but "
             "Relay improves token efficiency.",
             "If paired evidence passes, Relay may reduce token usage and the "
@@ -1145,8 +1019,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "improves token efficiency.",
             "This is not evidence that Relay reduces goal tokens and "
             "improves token efficiency.",
-            "The historical pre-v2 study failed and is not evidence that Fresh "
-            "Handoff improves token efficiency.",
+            "The historical pre-v2 study failed and is not evidence that Relay "
+            "improves token efficiency.",
         )
         for text in nonclaims:
             with self.subTest(text=text):

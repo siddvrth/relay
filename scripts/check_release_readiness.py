@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report public-release blockers without mutating the repository."""
+"""Report public-release blockers without changing the repo."""
 
 from __future__ import annotations
 
@@ -32,8 +32,7 @@ LIVE_HOOK_ADAPTERS = (
     "codex/relay_hook.sh",
     "scripts/workflow/relay_hook.sh",
 )
-# Lexical order is a frozen part of the framed digest contract, independent of
-# source-code grouping or future insert position.
+# Sort order is part of the digest; do not reorder.
 RUNTIME_BINDING_PATHS = tuple(
     sorted(
         (
@@ -530,7 +529,7 @@ def _git_regular_blob(
 
 
 def _digest_runtime_entries(entries: Iterator[tuple[str, str, bytes]]) -> str:
-    digest = hashlib.sha256(b"fresh-handoff-runtime-binding-v2\0")
+    digest = hashlib.sha256(b"relay-runtime-binding-v2\0")
     for path, mode, content in entries:
         encoded_path = path.encode("utf-8")
         digest.update(encoded_path)
@@ -896,12 +895,6 @@ def assess(root: Path = ROOT) -> dict[str, object]:
         warnings.append(
             "no repository marketplace catalog; direct install.sh works, but Git-backed "
             "plugin marketplace installation is not yet available"
-        )
-
-    if (root / ".agents" / "skills" / "session-continuity").exists():
-        warnings.append(
-            "legacy .agents/skills/session-continuity install exists locally; it is ignored "
-            "package state and should not be used to validate the renamed skill"
         )
 
     warnings.append(

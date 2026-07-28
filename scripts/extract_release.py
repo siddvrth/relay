@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify and safely materialize a Relay release without tar extraction."""
+"""Verify a Relay release and write files without using tar extract."""
 
 from __future__ import annotations
 
