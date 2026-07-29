@@ -296,12 +296,12 @@ class ReleaseReadinessTests(unittest.TestCase):
             result = self.assess(Path(temp))
         self.assertIn("plugin manifest is missing", result["blockers"])
 
-    def test_v2_push_validation_is_required(self) -> None:
+    def test_main_only_push_validation_is_required(self) -> None:
         error = release.assess_ci_validation_workflow(PROJECT_ROOT)
 
         self.assertIsNone(error)
 
-    def test_workflow_without_v2_push_is_blocked(self) -> None:
+    def test_main_only_push_validation_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             workflow = root / ".github" / "workflows" / "validate.yml"
@@ -315,11 +315,51 @@ class ReleaseReadinessTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            result = self.assess(root)
+            error = release.assess_ci_validation_workflow(root)
 
-        self.assertIn(
-            "CI validation workflow must run on pushes to exactly main and v2",
-            result["blockers"],
+        self.assertIsNone(error)
+
+    def test_workflow_missing_main_push_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            workflow = root / ".github" / "workflows" / "validate.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "name: validate\n\n"
+                "on:\n"
+                "  push:\n"
+                "    branches:\n"
+                "      - release\n",
+                encoding="utf-8",
+            )
+
+            error = release.assess_ci_validation_workflow(root)
+
+        self.assertEqual(
+            error,
+            "CI validation workflow must run on pushes to exactly main",
+        )
+
+    def test_workflow_with_additional_branch_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            workflow = root / ".github" / "workflows" / "validate.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "name: validate\n\n"
+                "on:\n"
+                "  push:\n"
+                "    branches:\n"
+                "      - main\n"
+                "      - release\n",
+                encoding="utf-8",
+            )
+
+            error = release.assess_ci_validation_workflow(root)
+
+        self.assertEqual(
+            error,
+            "CI validation workflow must run on pushes to exactly main",
         )
 
     def test_malformed_manifest_is_a_structured_blocker(self) -> None:

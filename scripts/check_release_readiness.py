@@ -248,13 +248,13 @@ def assess_ci_validation_workflow(root: Path) -> str | None:
         return "CI validation workflow is unreadable"
     match = PUSH_BRANCHES_PATTERN.search(text)
     if match is None:
-        return "CI validation workflow must run on pushes to exactly main and v2"
+        return "CI validation workflow must run on pushes to exactly main"
     branches = [
         line.split("-", maxsplit=1)[1].strip().strip("'\"")
         for line in match.group("branches").splitlines()
     ]
-    if len(branches) != 2 or set(branches) != {"main", "v2"}:
-        return "CI validation workflow must run on pushes to exactly main and v2"
+    if branches != ["main"]:
+        return "CI validation workflow must run on pushes to exactly main"
     return None
 
 
