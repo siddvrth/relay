@@ -50,11 +50,6 @@ check_file() {
 check_dir "$PKG/skills/relay" "$REPO/.agents/skills/relay" "installed skill"
 check_file "$PKG/codex/relay_hook.sh" "$REPO/scripts/workflow/relay_hook.sh" "Codex hook stub"
 
-if [[ -e "$REPO/.cursor/hooks/relay-gate.mjs" ]]; then
-  echo "UNSUPPORTED editor hook: $REPO/.cursor/hooks/relay-gate.mjs"
-  failures=$((failures + 1))
-fi
-
 if [[ "$failures" -ne 0 ]]; then
   echo "Install audit failed: $failures drift/missing check(s)." >&2
   exit 1

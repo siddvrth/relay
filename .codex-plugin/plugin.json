@@ -4,9 +4,9 @@
   "description": "Create bounded, acknowledgement-gated handoffs for session-safe continuation of long-running Codex work.",
   "author": {
     "name": "siddvrth",
-    "url": "https://github.com/siddvrth"
+    "url": "https://github.com/siddvrth/relay"
   },
-  "homepage": "https://github.com/siddvrth/relay#readme",
+  "homepage": "https://github.com/siddvrth/relay",
   "repository": "https://github.com/siddvrth/relay",
   "license": "MIT",
   "keywords": [
@@ -32,7 +32,7 @@
     "defaultPrompt": [
       "Checkpoint this task with a self-contained session revision and report readiness.",
       "Resume from the exact delivered path, SHA-256, source, transfer, goal, revision, and nonce; acknowledge before implementation.",
-      "Evaluate handoff quality and token efficiency without claiming improvement before the paired gate passes."
+      "Preserve this persistent Codex goal across clean contexts and repeat Relay as needed until it is done."
     ]
   }
 }

@@ -43,9 +43,6 @@ for relative in (
     "scripts/workflow",
     ".omx",
     ".omx/state",
-    ".cursor",
-    ".cursor/hooks",
-    ".cursor/hooks/state",
 ):
     path = repo / relative
     if os.path.lexists(path):
@@ -56,9 +53,6 @@ for relative in (
 for relative in (
     ".gitignore",
     "scripts/workflow/relay_hook.sh",
-    ".cursor/hooks/relay-gate.mjs",
-    ".cursor/hooks/state/relay-gate.json",
-    ".cursor/hooks.json",
 ):
     path = repo / relative
     if os.path.lexists(path):
@@ -138,6 +132,7 @@ diff -qr -x __pycache__ -x '*.pyc' -x .DS_Store \
   "$PKG/skills/relay" "$STAGED_SKILL" >/dev/null
 cmp -s "$PKG/codex/relay_hook.sh" "$STAGED_HOOK"
 PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile "$STAGED_SKILL/scripts/"*.py
+rm -rf "$STAGED_SKILL/scripts/__pycache__"
 bash -n "$STAGED_HOOK"
 
 # Swap skill + hook under one lock. On failure, restore every live path from
@@ -268,34 +263,9 @@ with lock_path.open("a+", encoding="utf-8") as lock_handle:
         raise
 PY
 
-# Live install is committed. Remaining cleanup is best-effort and must not
-# fail the install after a successful swap.
 INSTALL_COMMITTED=1
 trap - EXIT
 rm -rf "$STAGE_ROOT" || echo "Warning: could not remove install staging directory $STAGE_ROOT" >&2
-
-CURSOR_CLEANUP_SAFE=1
-for path in \
-  "$REPO/.cursor" \
-  "$REPO/.cursor/hooks" \
-  "$REPO/.cursor/hooks/state" \
-  "$REPO/.cursor/hooks/relay-gate.mjs" \
-  "$REPO/.cursor/hooks/state/relay-gate.json" \
-  "$REPO/.cursor/hooks.json"; do
-  if [[ -L "$path" ]]; then
-    CURSOR_CLEANUP_SAFE=0
-    echo "Warning: skipped compatibility cleanup through symlink $path" >&2
-    break
-  fi
-done
-if [[ "$CURSOR_CLEANUP_SAFE" -eq 1 ]]; then
-  rm -f "$REPO/.cursor/hooks/relay-gate.mjs" \
-    "$REPO/.cursor/hooks/state/relay-gate.json" \
-    || echo "Warning: could not remove pre-Codex compatibility files" >&2
-  if grep -q 'relay-gate\.mjs' "$REPO/.cursor/hooks.json" 2>/dev/null; then
-    echo "Warning: remove stale relay-gate.mjs entries from $REPO/.cursor/hooks.json" >&2
-  fi
-fi
 
 if [[ -L "$REPO/.gitignore" || -d "$REPO/.gitignore" ]]; then
   echo "Warning: skipped .gitignore update because it is not a real file" >&2

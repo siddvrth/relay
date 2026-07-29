@@ -1,11 +1,18 @@
 # Python
 __pycache__/
 *.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 
 # Local runtime state
 .omx/
 .omo/
 .agents/
+.codegraph
+
+# Ephemeral host evidence
+artifacts/metrics/live-hooks-trust.json
 
 # OS/editor noise
 .DS_Store

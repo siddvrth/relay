@@ -17,7 +17,6 @@
     "SECURITY.md",
     "artifacts/README.md",
     "artifacts/handoffs/sanitized-sample-handoff.md",
-    "artifacts/metrics/.gitkeep",
     "audit_install.sh",
     "codex/relay_hook.sh",
     "completion_gate.sh",

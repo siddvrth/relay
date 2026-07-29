@@ -59,8 +59,6 @@ Release evidence in `artifacts/metrics/live-hooks-trust.json` is valid only for 
 
 An unavailable live `/hooks` check is a release-blocking validation gap, not a silent pass.
 
-Older releases also created an unsupported editor hook. The installer removes the generated hook file; if user-owned `.cursor/hooks.json` still references `relay-gate.mjs`, remove that stale entry separately.
-
 ## Repair And Re-Audit
 
 ```bash

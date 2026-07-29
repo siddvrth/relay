@@ -19,6 +19,18 @@ from unittest import mock
 
 MODULE_PATH = Path(__file__).with_name("check_release_readiness.py")
 PROJECT_ROOT = MODULE_PATH.parents[1]
+COPYTREE_IGNORE = shutil.ignore_patterns(
+    ".git",
+    ".agents",
+    ".codegraph",
+    ".mypy_cache",
+    ".omo",
+    ".omx",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".DS_Store",
+    "__pycache__",
+)
 SPEC = importlib.util.spec_from_file_location("check_release_readiness", MODULE_PATH)
 assert SPEC and SPEC.loader
 release = importlib.util.module_from_spec(SPEC)
@@ -196,6 +208,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             },
         }
         path = root / "artifacts" / "metrics" / "live-hooks-trust.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
         return path
 
@@ -220,9 +233,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         shutil.copytree(
             PROJECT_ROOT,
             root,
-            ignore=shutil.ignore_patterns(
-                ".git", ".agents", ".omo", ".omx", ".DS_Store", "__pycache__"
-            ),
+            ignore=COPYTREE_IGNORE,
         )
         self.git(root, "init", "-q")
         self.git(root, "config", "user.name", "Release Test")
@@ -269,6 +280,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             prereg[f"{stem}_sha256"] = hashlib.sha256(content).hexdigest()
 
         evidence = root / "artifacts" / "metrics" / f"v{telemetry_version}-paired-study.json"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
         evidence.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         self.git(root, "add", str(evidence.relative_to(root)))
         self.git(root, "commit", "-qm", "evidence-only release commit")
@@ -348,9 +360,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             shutil.copytree(
                 PROJECT_ROOT,
                 root,
-                ignore=shutil.ignore_patterns(
-                    ".git", ".agents", ".omo", ".omx", ".DS_Store", "__pycache__"
-                ),
+                ignore=COPYTREE_IGNORE,
             )
             manifest_path = root / ".codex-plugin" / "plugin.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -392,7 +402,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             self.assertTrue(any("V2 is prior-schema only" in item for item in result["claim_blockers"]))
 
             live_evidence = self.write_live_evidence(root)
-            self.git(root, "add", str(live_evidence.relative_to(root)))
+            self.git(root, "add", "-f", str(live_evidence.relative_to(root)))
             self.git(root, "commit", "-qm", "live hook evidence-only commit")
             trusted = release.assess(root)
 
@@ -448,7 +458,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root, _, _ = self.make_bound_release(temp, telemetry_version=3)
             live_evidence = self.write_live_evidence(root)
-            self.git(root, "add", str(live_evidence.relative_to(root)))
+            self.git(root, "add", "-f", str(live_evidence.relative_to(root)))
             self.git(root, "commit", "-qm", "live hook evidence-only commit")
             result = release.assess(root)
 
@@ -497,10 +507,11 @@ class ReleaseReadinessTests(unittest.TestCase):
     def test_distribution_accepts_v2_and_v3_and_allows_zero_v3_nonclaim(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "distribution"
-            shutil.copytree(PROJECT_ROOT, root, ignore=shutil.ignore_patterns(".git", ".omx"))
+            shutil.copytree(PROJECT_ROOT, root, ignore=COPYTREE_IGNORE)
             baseline = distribution.validate_goal_telemetry_artifacts(root)
             self.assertEqual(baseline["v3_study_count"], 0)
             metrics = root / "artifacts" / "metrics"
+            metrics.mkdir(parents=True, exist_ok=True)
             (metrics / "v2-fixture.json").write_text(
                 json.dumps(v2_study_document()), encoding="utf-8"
             )
@@ -515,12 +526,14 @@ class ReleaseReadinessTests(unittest.TestCase):
     def test_distribution_rejects_malformed_v3(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "distribution"
-            shutil.copytree(PROJECT_ROOT, root, ignore=shutil.ignore_patterns(".git", ".omx"))
+            shutil.copytree(PROJECT_ROOT, root, ignore=COPYTREE_IGNORE)
             document = v3_study_document()
             rows = document["rows"]
             assert isinstance(rows, list)
             rows[0]["completion_tokens_after_resume"] = 0
-            (root / "artifacts" / "metrics" / "v3-malformed.json").write_text(
+            metrics = root / "artifacts" / "metrics"
+            metrics.mkdir(parents=True, exist_ok=True)
+            (metrics / "v3-malformed.json").write_text(
                 json.dumps(document), encoding="utf-8"
             )
             with self.assertRaisesRegex(ValueError, "invalid v3 goal telemetry"):
@@ -601,7 +614,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             shutil.copytree(
                 PROJECT_ROOT,
                 root,
-                ignore=shutil.ignore_patterns(".git", ".agents", ".omx", ".DS_Store", "__pycache__"),
+                ignore=COPYTREE_IGNORE,
             )
             (root / "README.md").write_text(
                 "# Relay\n\nDo not claim token or cost improvement. "
@@ -622,9 +635,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             shutil.copytree(
                 PROJECT_ROOT,
                 root,
-                ignore=shutil.ignore_patterns(
-                    ".git", ".agents", ".omx", ".DS_Store", "__pycache__"
-                ),
+                ignore=COPYTREE_IGNORE,
             )
             manifest_path = root / ".codex-plugin" / "plugin.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -658,9 +669,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 shutil.copytree(
                     PROJECT_ROOT,
                     root,
-                    ignore=shutil.ignore_patterns(
-                        ".git", ".agents", ".omx", ".DS_Store", "__pycache__"
-                    ),
+                    ignore=COPYTREE_IGNORE,
                 )
                 path = root / relative
                 path.write_text(
@@ -1032,9 +1041,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             shutil.copytree(
                 PROJECT_ROOT,
                 root,
-                ignore=shutil.ignore_patterns(
-                    ".git", ".agents", ".omx", ".DS_Store", "__pycache__"
-                ),
+                ignore=COPYTREE_IGNORE,
             )
             policy = root / ".codex-plugin" / "release-policy.json"
             policy.write_text(
@@ -1063,9 +1070,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             shutil.copytree(
                 PROJECT_ROOT,
                 root,
-                ignore=shutil.ignore_patterns(
-                    ".git", ".agents", ".omx", ".DS_Store", "__pycache__"
-                ),
+                ignore=COPYTREE_IGNORE,
             )
             stale = (
                 dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)

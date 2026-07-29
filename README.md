@@ -6,17 +6,27 @@ Generic handoff tools transfer one session into another. Relay is automatic, ver
 
 The product, plugin, and skill are all named `relay`.
 
+```text
+/goal Build X
+    ↓
+work
+    ↓
+Relay
+    ↓
+clean context
+    ↓
+same goal continues
+    ↓
+repeat as needed
+    ↓
+done
+```
+
 ### `/relay` vs `/compact`
 
-`/compact` compresses the conversation. Relay carries forward verified working state into a clean context.
+Official Codex documentation describes [`/compact`](https://learn.chatgpt.com/docs/developer-commands#keep-transcripts-lean-with-compact) as summarizing the visible chat to free tokens while retaining key points. Relay instead carries verified working state into a clean context.
 
-Official Codex `/compact`:
-
-- summarizes the existing chat to free context
-- retains critical details
-- continues from the compacted context
-
-The CLI `/compact` command is manual. OpenAI's Responses API also supports automatic server-side compaction. Neither makes `/compact` wrong; Relay solves a different problem.
+The CLI `/compact` command is manual, and Codex can also compact chats automatically. Separately, the [Responses API supports automatic server-side compaction](https://developers.openai.com/api/docs/guides/deployment-checklist#leverage-compaction). Neither makes `/compact` wrong; Relay solves a different problem.
 
 Relay:
 
@@ -33,7 +43,7 @@ Relay:
 | --- | --- | --- |
 | Primary strategy | Summarize existing chat | Serialize current working state |
 | Continues in | Compacted current chat | New clean task |
-| Carries | Key conversation state/reasoning | Bounded explicit task state |
+| Carries | Concise summary of earlier chat | Bounded explicit task state |
 | Repository revalidation | Not Relay's explicit contract | Required |
 | Exact next action/validation | Not guaranteed as typed fields | Required |
 | Goal Mode rotation | Same-chat continuation | Designed to repeat across clean tasks |
