@@ -45,7 +45,7 @@ The configurable `0.30` default is a conservative margin motivated by Qwen2.5-7B
 
 A production clean task is eligible only when the result reports `resume_ready:true`, `prompt_guard.fits:true`, exact capsule path/SHA-256/source/transfer/goal/revision/nonce identity, canonical `next_action`, exact `resume_validation.command`/`.expected`, and `delivery_emitted:true`. Delivery alone never transfers authority. The destination must verify the bound action/validation values and explicitly acknowledge; it becomes sole owner at acknowledgement but remains control-only until `status.can_continue:true` proves source quiescence or durable read-only `termination_pending`.
 
-`fork_thread` is not a production handoff because it inherits completed conversation history. If thread tools are absent, the package returns exact continuation data without claiming task creation.
+`thread/fork` is not a production handoff because it inherits completed conversation history. Automatic delivery uses host-side app-server `thread/start` and `turn/start`; the source model is not responsible for opening a destination. App-server failure retains exact continuation data without claiming task creation. Creating and running the destination is in scope; forcing Codex Desktop to visually navigate to it is not claimed without a supported API.
 
 ## Static Gate Versus Empirical Gate
 

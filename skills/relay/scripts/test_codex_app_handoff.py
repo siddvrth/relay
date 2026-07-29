@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -17,27 +16,12 @@ sys.modules[SPEC.name] = context_handoff
 SPEC.loader.exec_module(context_handoff)
 
 
-class LifecycleAction(TypedDict, total=False):
-    phase: str
-    command_argv: list[str]
-    app_action: str
-    commands_argv: list[list[str]]
-
-
-class ReadyResult(TypedDict):
+class ReadyResult(TypedDict, total=False):
     checkpoint_written: bool
     delivery_emitted: bool
     continuation_prompt: str
-    lifecycle_next_actions: list[LifecycleAction]
-
-
-class LaunchEnvelope(TypedDict):
-    contract: str
-    app_action: str
-    initial_prompt: str
-    lifecycle: list[LifecycleAction]
-    destination_id_source: str
-    source_stop_gate: str
+    launch_error: str | None
+    host_launch: dict[str, str | bool | None] | None
 
 
 def ready_result() -> ReadyResult:
@@ -45,66 +29,31 @@ def ready_result() -> ReadyResult:
         "checkpoint_written": True,
         "delivery_emitted": True,
         "continuation_prompt": "EXACT_BOUNDED_DESTINATION_PROMPT",
-        "lifecycle_next_actions": [
-            {
-                "phase": "launch_requested",
-                "command_argv": ["python3", "transfer_control.py", "launch-requested"],
-            },
-            {
-                "phase": "create_clean_task",
-                "app_action": "create_thread",
-            },
-            {
-                "phase": "delivered_and_started",
-                "commands_argv": [
-                    ["python3", "transfer_control.py", "delivered"],
-                    ["python3", "transfer_control.py", "started"],
-                ],
-            },
-        ],
+        "launch_error": None,
+        "host_launch": {
+            "acknowledged": True,
+            "deduplicated": False,
+            "destination_thread_id": "thr_destination",
+            "destination_turn_id": "turn_destination",
+            "status": "running",
+        },
     }
 
 
-def parse_launch_context(value: str) -> LaunchEnvelope:
-    return json.loads(value)
-
-
 class CodexAppHandoffTests(unittest.TestCase):
-    def test_missing_host_tool_telemetry_remains_unknown(self) -> None:
-        unknown = context_handoff.app_capability_guidance({})
-        unsupported = context_handoff.app_capability_guidance(
+    def test_host_transport_does_not_depend_on_model_thread_tools(self) -> None:
+        absent = context_handoff.app_capability_guidance({})
+        misleading = context_handoff.app_capability_guidance(
             {"available_thread_tools": []},
         )
-        supported = context_handoff.app_capability_guidance(
-            {"available_thread_tools": ["create_thread"]},
-        )
 
-        self.assertIsNone(unknown["create_clean_task_supported"])
-        self.assertFalse(unsupported["create_clean_task_supported"])
-        self.assertTrue(supported["create_clean_task_supported"])
+        self.assertEqual(absent, misleading)
+        self.assertTrue(absent["host_managed"])
+        self.assertTrue(absent["fresh_thread"])
+        self.assertFalse(absent["source_model_action_required"])
+        self.assertFalse(absent["desktop_ui_focus_supported"])
 
-    def test_lifecycle_uses_one_stable_transport_key_before_and_after_create(self) -> None:
-        transfer = {
-            "session_id": "source-session",
-            "transfer_id": "r1-0123456789abcdef",
-        }
-
-        actions = context_handoff.lifecycle_next_actions(
-            Path("/tmp/relay-app-test"),
-            transfer,
-            create_thread_available=True,
-        )
-
-        launch_command = actions[0]["command_argv"]
-        delivered_command = actions[2]["commands_argv"][0]
-        launch_key = launch_command[launch_command.index("--transport-key") + 1]
-        delivered_key = delivered_command[
-            delivered_command.index("--transport-key") + 1
-        ]
-        self.assertEqual(launch_key, transfer["transfer_id"])
-        self.assertEqual(delivered_key, transfer["transfer_id"])
-
-    def test_user_prompt_ready_handoff_requests_one_clean_app_task(self) -> None:
+    def test_user_prompt_success_returns_small_non_json_context(self) -> None:
         internal = ready_result()
 
         response = context_handoff.official_hook_response(
@@ -112,61 +61,48 @@ class CodexAppHandoffTests(unittest.TestCase):
             internal,
         )
 
-        envelope = parse_launch_context(
-            response["hookSpecificOutput"]["additionalContext"],
-        )
-        self.assertEqual(envelope["contract"], "relay.codex_app.clean_task.v1")
-        self.assertEqual(envelope["app_action"], "create_thread")
-        self.assertEqual(
-            envelope["initial_prompt"],
-            internal["continuation_prompt"],
-        )
-        self.assertEqual(
-            [step["phase"] for step in envelope["lifecycle"]],
-            [
-                "launch_requested",
-                "create_clean_task",
-                "delivered_and_started",
-            ],
-        )
-        self.assertEqual(envelope["destination_id_source"], "create_thread.threadId")
-        self.assertEqual(envelope["source_stop_gate"], "destination_acknowledged")
+        specific = response["hookSpecificOutput"]
+        self.assertEqual(specific["hookEventName"], "UserPromptSubmit")
+        additional = specific["additionalContext"]
+        self.assertIsInstance(additional, str)
+        self.assertFalse(str(additional).startswith("{"))
 
-    def test_pretool_ready_handoff_requests_one_clean_app_task(self) -> None:
+    def test_pretool_success_preserves_event_shape(self) -> None:
         internal = ready_result()
 
         response = context_handoff.official_hook_response("PreToolUse", internal)
 
         self.assertNotIn("continue", response)
-        envelope = parse_launch_context(
-            response["hookSpecificOutput"]["additionalContext"],
+        specific = response["hookSpecificOutput"]
+        self.assertEqual(specific["hookEventName"], "PreToolUse")
+        self.assertIsInstance(specific["additionalContext"], str)
+
+    def test_failed_launch_returns_manual_fallback_context(self) -> None:
+        internal = ready_result()
+        internal["delivery_emitted"] = False
+        internal["host_launch"] = {
+            "acknowledged": True,
+            "deduplicated": False,
+            "destination_thread_id": "thr_failed",
+            "destination_turn_id": "turn_failed",
+            "status": "failed",
+        }
+        internal["launch_error"] = "app-server failed"
+
+        response = context_handoff.official_hook_response(
+            "UserPromptSubmit",
+            internal,
         )
-        self.assertEqual(
-            response["hookSpecificOutput"]["hookEventName"],
-            "PreToolUse",
-        )
-        self.assertEqual(envelope["app_action"], "create_thread")
-        self.assertEqual(
-            envelope["initial_prompt"],
-            internal["continuation_prompt"],
-        )
+
+        specific = response["hookSpecificOutput"]
+        self.assertEqual(specific["hookEventName"], "UserPromptSubmit")
+        additional = str(specific["additionalContext"])
+        self.assertIn("Relay automatic launch failed", additional)
+        self.assertIn("EXACT_BOUNDED_DESTINATION_PROMPT", additional)
+        self.assertNotIn("Stop heavy work", additional)
 
     def test_precompact_ready_handoff_only_reports_checkpoint(self) -> None:
         internal = ready_result()
-
-        response = context_handoff.official_hook_response("PreCompact", internal)
-
-        self.assertEqual(
-            response,
-            {
-                "continue": True,
-                "systemMessage": "Relay state refreshed before compaction.",
-            },
-        )
-
-    def test_checkpoint_without_delivery_does_not_request_an_app_task(self) -> None:
-        internal = ready_result()
-        internal["delivery_emitted"] = False
 
         response = context_handoff.official_hook_response("PreCompact", internal)
 

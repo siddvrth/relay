@@ -846,33 +846,17 @@ class TransferIntegrationTests(unittest.TestCase):
         self.assertEqual(recovered["transfer_nonce"], intended_nonce)
         self.assertEqual(len(list(transfer_paths.transfers.glob("*.json"))), 1)
         self.assertFalse(state.prepare_intent.exists())
-        phases = [item["phase"] for item in recovered["lifecycle_next_actions"]]
-        self.assertEqual(
-            phases,
-            [
-                "launch_requested",
-                "create_clean_task",
-                "delivered_and_started",
-                "verify_and_acknowledge",
-                "source_stop",
-            ],
-        )
-        verify_step = recovered["lifecycle_next_actions"][3]
-        self.assertEqual(
-            [command[command.index("--repo") + 2] for command in verify_step["commands_argv"]],
-            ["verify", "acknowledge"],
-        )
         guidance = context.app_capability_guidance(
-            {"available_thread_tools": ["create_thread", "read_thread", "handoff_thread"]},
+            {"available_thread_tools": []},
             repo=self.repo,
             transfer={
                 "session_id": source,
                 "transfer_id": recovered["transfer_id"],
             },
         )
-        self.assertFalse(guidance["target_interrupt_isolation_supported"])
-        self.assertTrue(guidance["handoff_thread_candidate_available"])
-        self.assertIn("never generic interrupt or close", guidance["handoff_thread_rule"])
+        self.assertTrue(guidance["host_managed"])
+        self.assertTrue(guidance["fresh_thread"])
+        self.assertFalse(guidance["source_model_action_required"])
 
 
 if __name__ == "__main__":

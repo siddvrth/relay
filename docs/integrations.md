@@ -4,16 +4,18 @@ Relay supports Codex surfaces only. The Python runtime creates session-scoped ca
 
 ## Codex App
 
-When thread tools are available and continuous execution is authorized:
+For automatic continuous execution:
 
 1. Obtain a ready internal result with exact capsule path/hash, session, revision, and one continuation prompt.
-2. Resolve the current repository's project.
-3. Persist launch intent and create exactly one clean local task with the single prompt as its initial turn.
-4. Require destination verification and canonical exact acknowledgement; thread text is observation, never acknowledgement authority.
-5. After acknowledgement, use `handoff_thread(source)` only when authority and checkout compatibility prove its target-interrupt semantics are safe. It is not a generic close API.
-6. Otherwise record a cooperative stop result or durable read-only `termination_pending`; archive/visible closure is separate optional evidence.
+2. Persist `launching` state and start `codex app-server --stdio` with the user's normal environment and `CODEX_HOME`.
+3. Perform `initialize` then `initialized`.
+4. Call `thread/start` with the source repository's exact `cwd`; never copy source history.
+5. Call `turn/start` with the returned thread ID and the single bounded prompt.
+6. Persist both destination IDs, bind the transfer as delivered/started, and keep the worker alive through `turn/completed`.
+7. Require destination verification and canonical exact acknowledgement; thread text is observation, never acknowledgement authority.
+8. Record a cooperative stop result or durable read-only `termination_pending`; archive/visible closure and Desktop UI focus are separate optional outcomes.
 
-Do not use `fork_thread` for production context shedding; a fork inherits completed conversation history. If thread tools are unavailable, return the exact continuation data without claiming a task was created.
+Do not use `thread/fork` for production context shedding; a fork inherits completed conversation history. The source model does not invoke thread tools. If app-server launch or protocol handling fails, return the exact continuation data without claiming a task was created. Bounded deadlines stop stalled subprocesses; acknowledgement timeout is recorded as an unknown outcome and is not retried blindly. The detached transport has no approval UI, so it safely declines command/file approvals and grants no requested permission escalation.
 
 Goal text can be preserved, but host-owned goal identity may not transfer. The clean task inspects current goal state before recreating or continuing the recorded objective.
 
@@ -32,8 +34,8 @@ The adapters keep internal and official JSON separate:
 
 | Event | Allowed Relay response |
 | --- | --- |
-| `UserPromptSubmit` | Common fields plus one `relay.codex_app.clean_task.v1` source launch envelope in `hookSpecificOutput.additionalContext` when delivery is emitted |
-| `PreToolUse` | Model-visible launch context when ready, or a documented permission decision; allowed calls emit no unsupported common fields |
+| `UserPromptSubmit` | Small host-launch success notice after both destination IDs, or exact manual fallback on failure |
+| `PreToolUse` | The same host-launch result when ready, or a documented permission decision; allowed calls emit no unsupported common fields |
 | `PreCompact` | Common fields reporting a refreshed checkpoint only |
 | `Stop` | Common output fields only |
 

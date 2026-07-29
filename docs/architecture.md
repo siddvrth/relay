@@ -76,8 +76,8 @@ This separation prevents stale state while retaining one delivery per session co
 
 The internal orchestrator result includes capsule, readiness, revision, metrics, overflow, and delivery data. Official hook stdout is a separate translation:
 
-- a ready `UserPromptSubmit` may return a `relay.codex_app.clean_task.v1` launch envelope when compatible telemetry is already present
-- a ready `PreToolUse` returns the same model-visible launch envelope while preserving its write-authority permission decision
+- a ready `UserPromptSubmit` may invoke the host-side app-server launcher when compatible telemetry is already present, then return only the acknowledged result
+- a ready `PreToolUse` uses the same host-side launcher while preserving its write-authority permission decision
 - `PreCompact` writes or refreshes a checkpoint and reports that fact through common output only; it does not claim task creation
 - `Stop` uses common fields only
 
@@ -90,8 +90,8 @@ V3 aggregate telemetry spans the source-before-handoff, handoff-generation, dest
 - Before an acknowledgement boundary exists, malformed hook/checkpoint input retains the fail-open behavior. Durable revocation or destination ownership makes missing/corrupt authority handling fail closed for affected writers.
 - Readiness fails closed: a non-ready capsule never authorizes autonomous switching.
 - Install audits and validation fail closed on source/installed drift.
-- Thread-tool absence returns exact continuation data without pretending a clean task exists.
-- `fork_thread` is excluded from production handoffs because it inherits completed conversation history.
+- App-server launch or protocol failure retains exact continuation data without pretending a clean task exists.
+- `thread/fork` is excluded from production handoffs because it inherits completed conversation history.
 - Exact acknowledgement makes the destination sole owner before stop work; hooks are defense-in-depth and not an OS write ACL.
 
 ## Install Boundary

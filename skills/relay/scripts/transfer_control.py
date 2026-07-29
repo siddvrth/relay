@@ -68,6 +68,7 @@ PROCESS_GROUP_INTERRUPTION = {
 _AUTHORITY_LOCAL = threading.local()
 FAILURE_CODES = {
     "clean_session_launch_failed",
+    "destination_turn_failed",
     "launch_outcome_unknown",
     "capsule_verification_failed",
     "acknowledgement_timed_out",
@@ -817,6 +818,62 @@ def started(
         _append_event(
             record,
             "clean_session_started",
+            destination_session_id=destination_session_id,
+            destination_task_id=destination_task_id,
+        )
+        _write_record(paths, record)
+        _write_pointer(paths, record)
+        return _result(record)
+
+
+def destination_failed(
+    repo: Path,
+    *,
+    source_session_id: str,
+    transfer_id: str,
+    destination_session_id: str,
+    destination_task_id: str,
+    detail: str,
+) -> dict[str, Any]:
+    paths, _ = _load_exact(repo, source_session_id, transfer_id)
+    destination_session_id = _require_text(
+        "destination session ID",
+        destination_session_id,
+    )
+    destination_task_id = _require_text("destination task ID", destination_task_id)
+    detail = _require_text("destination failure detail", detail)
+    with _locked(paths.lock):
+        record = _active_record(paths)
+        if record["transfer_id"] != transfer_id:
+            raise TransferError("stale_transfer", "transfer is no longer active")
+        if (
+            record.get("destination_session_id") != destination_session_id
+            or record.get("destination_task_id") != destination_task_id
+        ):
+            raise TransferError(
+                "cross_session_acknowledgement",
+                "failed destination does not match the active transfer",
+            )
+        if record.get("phase") != "clean_session_started":
+            raise TransferError(
+                "invalid_transition",
+                "only an unverified destination can report launch failure",
+            )
+        launch = record.get("launch")
+        delivery = record.get("delivery")
+        if not isinstance(launch, dict) or not isinstance(delivery, dict):
+            raise TransferError(
+                "corrupt_state",
+                "started destination is missing launch or delivery state",
+            )
+        launch["status"] = "failed"
+        launch["outcome_at"] = _now()
+        launch["detail"] = detail
+        delivery["failed_at"] = _now()
+        _failure(record, "destination_turn_failed", detail)
+        _append_event(
+            record,
+            "destination_failed",
             destination_session_id=destination_session_id,
             destination_task_id=destination_task_id,
         )

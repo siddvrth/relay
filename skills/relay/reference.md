@@ -152,8 +152,8 @@ The continuation prompt exists in this transport result only. Its mandatory bloc
 
 Internal JSON is not written directly to a hook's stdout. The adapters translate it by event:
 
-- `UserPromptSubmit`: common output fields plus `hookSpecificOutput.hookEventName="UserPromptSubmit"` and one `relay.codex_app.clean_task.v1` source launch envelope only when delivery is emitted; the envelope carries the bounded destination prompt unchanged; acknowledged/revoked sources are blocked
-- `PreToolUse`: a ready threshold result returns model-visible launch context; exact transfer-control/read-only commands remain allowed while write-capable tools are denied for revoked sources and control-only destinations
+- `UserPromptSubmit`: after the host launcher acknowledges both destination IDs, common output fields plus a small `additionalContext` success notice; on launch failure, the exact bounded manual continuation fallback; acknowledged/revoked sources are blocked
+- `PreToolUse`: the same host-managed delivery result while preserving its write-authority permission decision; exact transfer-control/read-only commands remain allowed while write-capable tools are denied for revoked sources and control-only destinations
 - `PreCompact`: common output fields only; it reports checkpoint refresh and never claims automatic task launch
 - `Stop`: common output fields only; acknowledgement-gated stop state may force `continue:false`
 
@@ -179,7 +179,7 @@ Stop = ["bash scripts/workflow/relay_hook.sh Stop"]
 UserPromptSubmit = ["bash scripts/workflow/relay_hook.sh UserPromptSubmit"]
 ```
 
-The stub reads one hook JSON object from stdin, calls the installed orchestrator, and writes only the allowed official response.
+The stub reads one hook JSON object from stdin, calls the installed orchestrator, and writes only the allowed official response. Automatic delivery is performed by `codex_app_transport.py`, `codex_app_protocol.py`, and `codex_app_jsonrpc.py`, not by model-facing instructions. The delivery record moves through `launching`, `running`, and `completed` or `failed` with exact source, destination, capsule, `cwd`, and timestamp fields. JSON-RPC response and turn waits are bounded. Because the detached worker has no approval UI, command/file approvals are declined and permission requests receive no grants. A successful destination can be read through app-server, but automatic Desktop UI navigation is a separate unsupported outcome.
 
 ## Installation
 

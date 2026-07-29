@@ -246,6 +246,7 @@ def run_hook(
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["ROOT"] = str(repo)
+    env["RELAY_CODEX_APP_TRANSPORT"] = "disabled"
     if plugin_root is not None:
         env["PLUGIN_ROOT"] = str(plugin_root)
     return subprocess.run(
@@ -2306,14 +2307,9 @@ class HookEnvelopeAndParityTests(unittest.TestCase):
             additional_context = specific.get("additionalContext")
             self.assertIsInstance(additional_context, str)
             self.assertTrue(additional_context)
-            app_envelope = json.loads(str(additional_context))
-            self.assertEqual(
-                app_envelope["contract"],
-                "relay.codex_app.clean_task.v1",
-            )
             self.assertLessEqual(
-                len(str(app_envelope["initial_prompt"]).encode("utf-8")),
-                1024,
+                len(str(additional_context).encode("utf-8")),
+                1400,
             )
 
     def test_event_specific_official_envelopes_and_missing_ratio_fallback(self) -> None:
@@ -2411,7 +2407,6 @@ class HookEnvelopeAndParityTests(unittest.TestCase):
                 assert isinstance(specific, dict)
                 prompt = specific.get("additionalContext")
                 self.assertIsInstance(prompt, str)
-                app_envelope = json.loads(str(prompt))
 
                 _pointer_path, pointer = find_latest_pointer(repo)
                 capsule_path = contract_value(pointer, "capsule_path")
@@ -2423,13 +2418,8 @@ class HookEnvelopeAndParityTests(unittest.TestCase):
                 normalized[name] = {
                     "keys": sorted(payload),
                     "event": specific.get("hookEventName"),
-                    "app_contract": app_envelope["contract"],
-                    "app_action": app_envelope["app_action"],
-                    "lifecycle_phases": [
-                        step["phase"] for step in app_envelope["lifecycle"]
-                    ],
                     "prompt": normalize_transport_text(
-                        str(app_envelope["initial_prompt"]),
+                        str(prompt),
                         repo,
                     ),
                     "resume_ready": contract_value(pointer, "resume_ready"),

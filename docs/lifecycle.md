@@ -55,9 +55,9 @@ Launch exactly one clean task only when the internal result reports all of the f
 - `prompt_guard.fits:true`
 - `delivery_emitted:true` with one continuation prompt
 
-Record launch intent before invoking a host, then create a clean local task with that single prompt as its initial turn. A lost create result must be reconciled by exact nonce-bearing destination inspection rather than blind creation retry. Do not use `fork_thread`: a fork inherits completed conversation history.
+Record launch intent before spawning `codex app-server --stdio`. After `initialize` and `initialized`, call `thread/start` exactly once with the source repository's exact `cwd`, then call `turn/start` with the single bounded prompt. Persist `launching` before the spawn, `running` only after both destination IDs are returned, and `completed` or `failed` after the worker observes the terminal event. A repeated delivery ID is rejected before another process starts. Do not use `thread/fork`: copied history defeats context shedding.
 
-If thread tools are unavailable, return the exact result fields and prompt without claiming task creation. Never replace the exact identity with a “latest checkpoint” directory scan.
+If app-server cannot launch or the protocol fails, keep the capsule and manual prompt, record the failure atomically, and do not claim delivery. Acknowledgement timeout terminates the owned worker process group and records an unknown outcome; corrupt or missing delivery state fails closed before spawn. A terminal destination failure keeps its real IDs as evidence, clears the delivered claim, and surfaces the exact manual fallback. Never replace the exact identity with a “latest checkpoint” directory scan.
 
 ## 5. Resume Safely
 

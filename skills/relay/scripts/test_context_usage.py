@@ -186,6 +186,8 @@ class ContextUsageTests(unittest.TestCase):
                     }
                 )
 
+                env = os.environ.copy()
+                env["RELAY_CODEX_APP_TRANSPORT"] = "disabled"
                 result = subprocess.run(
                     [
                         sys.executable,
@@ -199,7 +201,7 @@ class ContextUsageTests(unittest.TestCase):
                         "PreToolUse",
                     ],
                     cwd=repo,
-                    env=dict(os.environ),
+                    env=env,
                     input=payload,
                     check=False,
                     capture_output=True,
@@ -258,10 +260,13 @@ class ContextUsageTests(unittest.TestCase):
                 "--official-hook-event",
                 "PreToolUse",
             ]
+            env = os.environ.copy()
+            env["RELAY_CODEX_APP_TRANSPORT"] = "disabled"
 
             first = subprocess.run(
                 command,
                 cwd=repo,
+                env=env,
                 input=payload,
                 check=False,
                 capture_output=True,
@@ -270,6 +275,7 @@ class ContextUsageTests(unittest.TestCase):
             second = subprocess.run(
                 command,
                 cwd=repo,
+                env=env,
                 input=payload,
                 check=False,
                 capture_output=True,

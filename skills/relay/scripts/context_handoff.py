@@ -13,6 +13,7 @@ import math
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import time
@@ -38,6 +39,7 @@ from write_handoff import (  # noqa: E402
     validate_structural_readiness,
 )
 from context_usage import extract_context_used, parse_ratio  # noqa: E402
+from codex_app_transport import DeliveryConfig, launch as launch_codex_app  # noqa: E402
 from transfer_control import (  # noqa: E402
     TransferError,
     authority_transaction,
@@ -238,6 +240,8 @@ def read_json(path: Path) -> dict[str, Any] | None:
 def recently_handed_off(path: Path, dedup_seconds: int) -> bool:
     record = read_json(path)
     if not record:
+        return False
+    if record.get("status") == "failed":
         return False
     timestamp = record.get("timestamp")
     if not isinstance(timestamp, (int, float)) or not math.isfinite(float(timestamp)):
@@ -520,134 +524,19 @@ def build_user_message(context_ratio: float | None, threshold: float, trigger: s
     return "A fresh checkpoint revision was written."
 
 
-def lifecycle_next_actions(
-    repo: Path,
-    transfer: dict[str, Any],
-    *,
-    create_thread_available: bool | None,
-) -> list[dict[str, Any]]:
-    source = str(transfer.get("session_id") or transfer.get("source_session_id") or "<source-session-id>")
-    transfer_id = str(transfer.get("transfer_id") or "<transfer-id>")
-    script = str(Path(__file__).with_name("transfer_control.py").resolve())
-    base = [sys.executable, script, "--repo", str(repo.resolve())]
-    exact = [
-        "--source-session-id", source,
-        "--transfer-id", transfer_id,
-        "--destination-session-id", "<destination-session-id>",
-        "--destination-task-id", "<destination-task-id>",
-        "--goal-identity", str(transfer.get("goal_identity") or "<goal-identity>"),
-        "--capsule-path", str(transfer.get("capsule_path") or "<capsule-path>"),
-        "--capsule-revision", str(transfer.get("revision") or "<capsule-revision>"),
-        "--capsule-sha256", str(transfer.get("capsule_sha256") or "<capsule-sha256>"),
-        "--nonce", str(transfer.get("transfer_nonce") or "<nonce>"),
-    ]
-    return [
-        {
-            "phase": "launch_requested",
-            "command_argv": [*base, "launch-requested", "--source-session-id", source, "--transfer-id", transfer_id, "--transport-key", transfer_id],
-        },
-        {
-            "phase": "create_clean_task",
-            "app_action": "create_thread",
-            "available": create_thread_available,
-            "rule": "record launch_requested before invoking; unknown outcome must be reconciled, never blindly retried",
-        },
-        {
-            "phase": "delivered_and_started",
-            "commands_argv": [
-                [*base, "delivered", "--source-session-id", source, "--transfer-id", transfer_id, "--transport-key", transfer_id, "--destination-task-id", "<destination-task-id>"],
-                [*base, "started", "--source-session-id", source, "--transfer-id", transfer_id, "--destination-session-id", "<destination-session-id>", "--destination-task-id", "<destination-task-id>"],
-            ],
-        },
-        {
-            "phase": "verify_and_acknowledge",
-            "rule": "destination must supply every exact capsule identity field from the active transfer before acknowledgement",
-            "commands_argv": [
-                [
-                    *base,
-                    "verify",
-                    *exact,
-                    "--repository-inspected",
-                    "--goal-inspected",
-                    "--exact-next-action",
-                    str(transfer.get("next_action") or "<exact-next-action>"),
-                    "--resume-validation-command",
-                    str(
-                        (transfer.get("resume_validation") or {}).get("command")
-                        or "<resume-validation-command>"
-                    ),
-                    "--resume-validation-expected",
-                    str(
-                        (transfer.get("resume_validation") or {}).get("expected")
-                        or "<resume-validation-expected>"
-                    ),
-                ],
-                [*base, "acknowledge", *exact],
-            ],
-        },
-        {
-            "phase": "source_stop",
-            "commands_argv": [
-                [*base, "request-stop", "--source-session-id", source, "--transfer-id", transfer_id, "--capability", "<verified-capability>"],
-                [*base, "record-stop", "--source-session-id", source, "--transfer-id", transfer_id, "--result", "termination_pending"],
-            ],
-            "host_adapter_success_command_argv": [
-                *base,
-                "record-stop",
-                "--source-session-id", source,
-                "--transfer-id", transfer_id,
-                "--result", "<compatible-final-result>",
-                "--evidence-kind", "<capability-result-evidence-kind>",
-                "--evidence-reference", "<durable-adapter-evidence-reference>",
-            ],
-            "rule": "prompt-driven paths may record only unsupported, failed, or termination_pending; success requires host-adapter evidence",
-        },
-    ]
-
-
 def app_capability_guidance(
     payload: dict[str, Any],
     *,
     repo: Path | None = None,
     transfer: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    raw = payload.get("available_thread_tools")
-    if raw is None:
-        raw = payload.get("availableTools")
-    tools_reported = isinstance(raw, list)
-    available = {str(item) for item in raw} if tools_reported else set()
-    create_thread_available = (
-        "create_thread" in available if tools_reported else None
-    )
-    read_thread_available = "read_thread" in available if tools_reported else None
-    handoff_thread_available = (
-        "handoff_thread" in available if tools_reported else None
-    )
     return {
-        "capability_gated": True,
-        "create_clean_task_supported": create_thread_available,
-        "observe_destination_supported": read_thread_available,
-        "target_interrupt_isolation_supported": False,
-        "handoff_thread_candidate_available": handoff_thread_available,
-        "handoff_thread_rule": (
-            "candidate only after acknowledgement, verified target authority, and checkout compatibility; never generic interrupt or close support"
-            if handoff_thread_available is True
-            else (
-                "unavailable; persist termination_pending after enforced read-only"
-                if handoff_thread_available is False
-                else "host capability unreported; do not infer interruption support"
-            )
-        ),
+        "transport": "codex app-server --stdio",
+        "host_managed": True,
+        "fresh_thread": True,
+        "source_model_action_required": False,
         "visible_archive_is_separate": True,
-        "lifecycle_next_actions": (
-            lifecycle_next_actions(
-                repo,
-                transfer,
-                create_thread_available=create_thread_available,
-            )
-            if repo is not None and transfer is not None
-            else []
-        ),
+        "desktop_ui_focus_supported": False,
     }
 
 
@@ -685,41 +574,6 @@ def _empty_result(args: argparse.Namespace, context_ratio: float | None) -> dict
     }
 
 
-def codex_app_launch_context(internal: dict[str, Any]) -> str | None:
-    prompt = internal.get("continuation_prompt")
-    actions = internal.get("lifecycle_next_actions")
-    if (
-        internal.get("delivery_emitted") is not True
-        or not isinstance(prompt, str)
-        or not prompt
-        or not isinstance(actions, list)
-    ):
-        return None
-    launch_actions = [
-        action
-        for action in actions
-        if isinstance(action, dict)
-        and action.get("phase")
-        in {"launch_requested", "create_clean_task", "delivered_and_started"}
-    ]
-    return json.dumps(
-        {
-            "contract": "relay.codex_app.clean_task.v1",
-            "execute": True,
-            "app_action": "create_thread",
-            "project_environment": "local",
-            "initial_prompt": prompt,
-            "lifecycle": launch_actions,
-            "destination_id_source": "create_thread.threadId",
-            "create_count": 1,
-            "unknown_outcome": "reconcile_do_not_retry",
-            "source_stop_gate": "destination_acknowledged",
-        },
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-
-
 def official_hook_response(
     event: str,
     internal: dict[str, Any],
@@ -745,13 +599,13 @@ def official_hook_response(
                     "permissionDecisionReason": reason,
                 },
             }
-        launch_context = codex_app_launch_context(internal)
-        if launch_context is None:
+        additional_context = _hook_delivery_context(internal)
+        if additional_context is None:
             return {}
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "additionalContext": launch_context,
+                "additionalContext": additional_context,
             },
         }
 
@@ -764,13 +618,13 @@ def official_hook_response(
             return {"continue": False, "stopReason": reason}
 
     if event == "UserPromptSubmit":
-        launch_context = codex_app_launch_context(internal)
-        if launch_context is not None:
+        additional_context = _hook_delivery_context(internal)
+        if additional_context is not None:
             return {
                 "continue": True,
                 "hookSpecificOutput": {
                     "hookEventName": "UserPromptSubmit",
-                    "additionalContext": launch_context,
+                    "additionalContext": additional_context,
                 },
             }
         return {"continue": True}
@@ -792,6 +646,24 @@ def official_hook_response(
         return {"continue": True}
 
     return {"continue": True}
+
+
+def _hook_delivery_context(internal: dict[str, Any]) -> str | None:
+    launch = internal.get("host_launch")
+    error = internal.get("launch_error")
+    prompt = internal.get("continuation_prompt")
+    if isinstance(error, str) and isinstance(prompt, str) and prompt:
+        return (
+            f"Relay automatic launch failed: {error}\n"
+            f"Manual continuation prompt:\n{prompt}"
+        )
+    if isinstance(launch, dict) and launch.get("acknowledged") is True:
+        thread_id = launch.get("destination_thread_id")
+        return (
+            f"Relay created destination thread {thread_id} and started the "
+            "continuation. Stop heavy work in this source thread."
+        )
+    return None
 
 
 def _authorized_json_writes(
@@ -873,6 +745,35 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
         force=args.force_handoff,
     ):
         return result
+    paths = state_paths(repo, args.session_id)
+    recorded_delivery = read_json(paths.delivery)
+    if (
+        args.official_hook_event
+        and isinstance(recorded_delivery, dict)
+        and recorded_delivery.get("status") == "failed"
+    ):
+        result.update(
+            {
+                "transfer_id": recorded_delivery.get("transfer_id"),
+                "continuation_prompt": recorded_delivery.get(
+                    "continuation_prompt"
+                ),
+                "launch_error": recorded_delivery.get("error"),
+                "host_launch": {
+                    "acknowledged": False,
+                    "deduplicated": True,
+                    "destination_thread_id": recorded_delivery.get(
+                        "destination_thread_id"
+                    ),
+                    "destination_turn_id": recorded_delivery.get(
+                        "destination_turn_id"
+                    ),
+                    "status": "failed",
+                },
+                "skip_reason": "previous destination launch failed",
+            }
+        )
+        return result
     current_transfer = transfer_status(
         repo,
         source_session_id=source_session_id,
@@ -891,7 +792,6 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
         result["skip_reason"] = f"transfer already in flight ({current_phase})"
         return result
 
-    paths = state_paths(repo, args.session_id)
     with authority_transaction(
         repo,
         actor_session_id=actor_session_id,
@@ -1124,8 +1024,14 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
         continuation_prompt = None
         if resume_ready and not delivery_recent:
             continuation_prompt = write_result.get("continuation_prompt")
-            if isinstance(continuation_prompt, str) and continuation_prompt:
-                delivery_emitted = True
+            delivery_emitted = isinstance(continuation_prompt, str) and bool(
+                continuation_prompt
+            )
+            automatic_requested = (
+                args.official_hook_event in {"UserPromptSubmit", "PreToolUse"}
+                and os.environ.get("RELAY_CODEX_APP_TRANSPORT") != "disabled"
+            )
+            if delivery_emitted and not automatic_requested:
                 delivery = {
                     "timestamp": time.time(),
                     "revision": revision,
@@ -1200,6 +1106,64 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
             ),
         )
 
+    host_launch = None
+    launch_error = None
+    delivered = False
+    automatic_event = args.official_hook_event in {
+        "UserPromptSubmit",
+        "PreToolUse",
+    } and os.environ.get("RELAY_CODEX_APP_TRANSPORT") != "disabled"
+    if (
+        args.official_hook_event in {"UserPromptSubmit", "PreToolUse"}
+        and not automatic_event
+        and delivery_emitted
+    ):
+        launch_error = "automatic Codex App transport disabled"
+        delivery_emitted = False
+    if automatic_event and delivery_emitted and isinstance(continuation_prompt, str):
+        codex_path = Path(shutil.which("codex") or "codex")
+        launch_result = launch_codex_app(
+            DeliveryConfig(
+                repo=repo,
+                cwd=repo,
+                capsule_path=Path(str(write_result.get("capsule_path"))),
+                continuation_prompt=continuation_prompt,
+                source_session_id=source_session_id,
+                delivery_id=str(pointer.get("transfer_id")),
+                transfer_id=str(pointer.get("transfer_id")),
+                state_path=paths.delivery,
+                codex_binary=codex_path,
+            )
+        )
+        host_launch = {
+            "acknowledged": launch_result.acknowledged,
+            "deduplicated": launch_result.deduplicated,
+            "destination_thread_id": launch_result.destination_thread_id,
+            "destination_turn_id": launch_result.destination_turn_id,
+            "status": launch_result.status,
+        }
+        launch_error = launch_result.error
+        delivered = launch_result.acknowledged
+        delivery_emitted = delivered
+        pointer["delivery"] = {
+            "emitted": delivery_emitted,
+            "deduped": bool(
+                host_launch and host_launch.get("deduplicated") is True
+            ),
+        }
+        final_metrics["delivery_emitted"] = delivery_emitted
+        final_metrics["deduped"] = pointer["delivery"]["deduped"]
+        pointer["metrics"] = final_metrics
+        _authorized_json_writes(
+            repo,
+            actor_session_id=actor_session_id,
+            source_session_id=source_session_id,
+            writes=(
+                (paths.session_pointer, pointer),
+                (paths.latest_pointer, pointer),
+            ),
+        )
+
     result.update(
         {
             "should_handoff": delivery_emitted,
@@ -1226,7 +1190,9 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
             "validation_evidence": pointer.get("validation_evidence", []),
             "resume_validation": pointer.get("resume_validation"),
             "delivery_emitted": delivery_emitted,
-            "delivered": delivery_emitted,
+            "delivered": delivered,
+            "host_launch": host_launch,
+            "launch_error": launch_error,
             "skip_reason": (
                 "recent delivery already emitted for this session"
                 if delivery_recent
@@ -1234,7 +1200,6 @@ def invoke(repo: Path, args: argparse.Namespace, payload: dict[str, Any]) -> dic
             ),
             "metrics": final_metrics,
             "app_guidance": pointer["app_guidance"],
-            "lifecycle_next_actions": pointer["app_guidance"]["lifecycle_next_actions"],
         }
     )
     return result

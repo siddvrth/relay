@@ -90,12 +90,12 @@ Capsule readiness and transport readiness are independent. The mandatory prompt 
 
 2. Refresh through `context_handoff.py` or a configured hook. `PreToolUse` is the proactive in-turn trigger; every `PreCompact` advances the revision as a last-resort checkpoint, while the recent-delivery cooldown suppresses duplicate transport.
 3. Continue only when the result has `resume_ready:true`, `prompt_guard.fits:true`, and an emitted prompt containing the exact capsule path, SHA-256, session, and revision.
-4. If a ready internal result or `relay.codex_app.clean_task.v1` hook envelope is present and Codex App exposes `create_thread`, execute that envelope immediately: record its existing `launch_requested` command, create exactly one clean task in the current saved project's local environment with `initial_prompt` unchanged, then bind the returned `threadId` through the existing `delivered` and `started` commands. If creation returns an unknown outcome, reconcile it and never retry blindly.
+4. For an automatic Codex App delivery, the host-side launcher records `launch_requested`, starts `codex app-server --stdio` with the user's normal environment, performs `initialize` then `initialized`, calls `thread/start` with the source repository's exact `cwd`, and calls `turn/start` with the bounded continuation prompt unchanged. It atomically binds the returned thread and turn IDs, then stays alive through `turn/completed`.
 5. The destination verifies the exact transfer ID, source, goal identity, revision, capsule SHA-256, nonce, live repo/goal state, `next_action`, and both exact `resume_validation` fields, then explicitly acknowledges.
 6. Exact acknowledgement atomically revokes source write authority and makes the destination owner. The destination remains control-only until status reports either observed source quiescence or durable read-only `termination_pending` and `can_continue:true`.
 7. Only after acknowledgement request an actually supported stop capability. Visible archive/closure is separate evidence and never proves quiescence.
 
-Do not use `fork_thread` for the production handoff path: a fork inherits completed conversation history and does not shed that context.
+Do not use `thread/fork` for the production handoff path: a fork inherits completed conversation history and does not shed that context. Relay does not depend on the source model invoking thread-management tools.
 
 ## Fresh-Session Resume Protocol
 
@@ -142,6 +142,10 @@ Goal-period `tokensUsed` is narrower than total context, billing usage, cached i
 | --- | --- |
 | `scripts/write_handoff.py` | Write a bounded v2 capsule and one bounded prompt |
 | `scripts/context_handoff.py` | Scope revisions, locks, and delivery by session; translate official hook envelopes |
+| `scripts/codex_app_transport.py` | Deduplicate, detach, and supervise the host-side Codex App delivery worker |
+| `scripts/codex_app_protocol.py` | Speak app-server JSONL from initialization through persisted thread verification |
+| `scripts/codex_app_jsonrpc.py` | Correlate JSON-RPC messages, decline unserviceable approvals, and enforce deadlines |
+| `scripts/codex_app_delivery_state.py` | Validate launch inputs and atomically persist authoritative delivery state |
 | `scripts/transfer_control.py` | Canonical durable transfer journal, acknowledgement, ownership guard, and stop-result authority |
 | `scripts/goal_telemetry_report.py` | Analyze preregistered paired goal-token evidence |
 | `scripts/test_write_handoff.py` | Standard-library contract and lifecycle tests |
@@ -154,6 +158,8 @@ Important flags include `--session-id`, `--revision`, `--capsule-budget-bytes`, 
 python3 skills/relay/scripts/test_write_handoff.py
 python3 skills/relay/scripts/test_transfer_control.py
 python3 skills/relay/scripts/test_transfer_integration.py
+python3 skills/relay/scripts/test_codex_app_transport.py
+python3 skills/relay/scripts/smoke_codex_app_transport.py
 python3 scripts/test_release_readiness.py
 python3 scripts/validate_distribution.py
 bash validate.sh

@@ -79,6 +79,8 @@ python3 "$SKILL/test_transfer_control.py" -q
 python3 "$SKILL/test_transfer_integration.py" -q
 python3 "$SKILL/test_transfer_hostile.py" -q
 python3 "$SKILL/test_codex_app_handoff.py" -q
+python3 "$SKILL/test_codex_app_transport.py" -q
+python3 "$SKILL/test_codex_app_transport_safety.py" -q
 python3 "$SKILL/test_context_usage.py" -q
 python3 "$SKILL/test_write_handoff.py"
 if [[ "${RELAY_SKIP_RELEASE_CONSUMER:-0}" != "1" ]]; then
@@ -97,6 +99,8 @@ python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_write_handoff.py" >/dev/n
 python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_transfer_control.py" -q >/dev/null
 python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_transfer_hostile.py" -q >/dev/null
 python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_codex_app_handoff.py" -q >/dev/null
+python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_codex_app_transport.py" -q >/dev/null
+python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_codex_app_transport_safety.py" -q >/dev/null
 python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_context_usage.py" -q >/dev/null
 echo "fresh-install installed test suite: OK"
 for session_id in a b plugin-a plugin-b; do
@@ -143,11 +147,11 @@ for payload in states.values():
 PY
 echo "fresh-install canonical optional-state seed: OK"
 
-threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"a","context_usage_percent":31}' | bash scripts/workflow/relay_hook.sh UserPromptSubmit 2>/dev/null)"
+threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"a","context_usage_percent":31}' | RELAY_CODEX_APP_TRANSPORT=disabled bash scripts/workflow/relay_hook.sh UserPromptSubmit 2>/dev/null)"
 compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"b","context_usage_percent":1}' | bash scripts/workflow/relay_hook.sh PreCompact 2>/dev/null)"
 capsule_count="$(find "$SMOKE_REPO/.omx/state/relay" -name '*-handoff.md' -type f | wc -l | tr -d '[:space:]')"
 
-plugin_threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-a","context_usage_percent":31}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/relay_hook.sh" UserPromptSubmit 2>/dev/null)"
+plugin_threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-a","context_usage_percent":31}' | RELAY_CODEX_APP_TRANSPORT=disabled PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/relay_hook.sh" UserPromptSubmit 2>/dev/null)"
 plugin_compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-b","context_usage_percent":1}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/relay_hook.sh" PreCompact 2>/dev/null)"
 
 python3 - "$SMOKE_REPO" "$threshold" "$compact" "$plugin_threshold" "$plugin_compact" "$capsule_count" <<'PY'
@@ -174,10 +178,7 @@ for session_id, payload in thresholds:
     assert set(payload) <= official_keys
     specific = payload["hookSpecificOutput"]
     assert specific["hookEventName"] == "UserPromptSubmit"
-    app_envelope = json.loads(specific["additionalContext"])
-    assert app_envelope["contract"] == "relay.codex_app.clean_task.v1"
-    assert app_envelope["app_action"] == "create_thread"
-    prompt = app_envelope["initial_prompt"]
+    prompt = specific["additionalContext"]
     pointer = next(
         candidate
         for path in (repo / ".omx/state/relay/sessions").glob("*/.pointer.json")
@@ -197,7 +198,7 @@ for session_id, payload in thresholds:
         state["resume_validation"]["expected"],
     )
     assert all(str(value) in prompt for value in dynamic_values)
-    assert len(prompt.encode("utf-8")) <= pointer["metrics"]["prompt_budget_bytes"]
+    assert len(prompt.encode("utf-8")) <= pointer["metrics"]["prompt_budget_bytes"] + 256
 
 for payload in compacts:
     assert set(payload) <= official_keys

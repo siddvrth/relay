@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,35 @@ def run(
     )
 
 
+def require_passed(result: subprocess.CompletedProcess[str]) -> None:
+    if result.returncode != 0:
+        raise AssertionError(result.stderr or result.stdout)
+
+
+def snapshot_release_source(destination: Path) -> str:
+    contract_path = ROOT / ".codex-plugin" / "release-files.json"
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    destination.mkdir()
+    for relative in contract["paths"]:
+        source = ROOT / relative
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    require_passed(run(["git", "init", "-q"], destination))
+    require_passed(run(["git", "config", "user.name", "Relay Tests"], destination))
+    require_passed(
+        run(
+            ["git", "config", "user.email", "relay-tests@example.invalid"],
+            destination,
+        )
+    )
+    require_passed(run(["git", "add", "."], destination))
+    require_passed(run(["git", "commit", "-qm", "release consumer snapshot"], destination))
+    result = run(["git", "rev-parse", "HEAD"], destination)
+    require_passed(result)
+    return result.stdout.strip()
+
+
 class FreshReleaseConsumerTests(unittest.TestCase):
     def assert_passed(self, result: subprocess.CompletedProcess[str]) -> None:
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
@@ -42,24 +72,23 @@ class FreshReleaseConsumerTests(unittest.TestCase):
     def test_fresh_consumer_installs_and_checkpoints_from_release(self) -> None:
         source_status = run(["git", "status", "--porcelain=v1", "-z"], ROOT)
         self.assert_passed(source_status)
-        commit_result = run(["git", "rev-parse", "HEAD"], ROOT)
-        self.assert_passed(commit_result)
-        commit = commit_result.stdout.strip()
         with tempfile.TemporaryDirectory(prefix="relay-consumer-") as temp:
             workspace = Path(temp)
+            source = workspace / "source"
             output = workspace / "output"
             extraction = workspace / "extraction"
             consumer = workspace / "consumer"
             output.mkdir()
             extraction.mkdir()
             consumer.mkdir()
+            commit = snapshot_release_source(source)
 
             built = run(
                 [
                     sys.executable,
                     str(BUILDER),
                     "--repo",
-                    str(ROOT),
+                    str(source),
                     "--commit",
                     commit,
                     "--output-dir",
@@ -88,6 +117,32 @@ class FreshReleaseConsumerTests(unittest.TestCase):
             self.assert_passed(extracted)
             package = extraction / f"relay-{manifest['version']}"
             self.assertTrue(package.is_dir())
+            archive_scripts = package / "skills" / "relay" / "scripts"
+            imported = run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import context_handoff; assert callable(context_handoff.launch_codex_app)",
+                ],
+                cwd=archive_scripts,
+            )
+            self.assert_passed(imported)
+            self.assert_passed(
+                run(
+                    [sys.executable, str(archive_scripts / "context_handoff.py"), "--help"],
+                    cwd=archive_scripts,
+                )
+            )
+            for test_name in (
+                "test_codex_app_transport.py",
+                "test_codex_app_transport_safety.py",
+            ):
+                self.assert_passed(
+                    run(
+                        [sys.executable, str(archive_scripts / test_name), "-q"],
+                        cwd=archive_scripts,
+                    )
+                )
 
             verified = run(
                 [
