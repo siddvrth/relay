@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "paths": [
+    ".claude-plugin/marketplace.json",
     ".codex-plugin/plugin.json",
     ".codex-plugin/release-files.json",
     ".codex-plugin/release-policy.json",

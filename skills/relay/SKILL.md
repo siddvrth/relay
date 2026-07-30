@@ -107,7 +107,7 @@ The mandatory transported prompt identifies one capsule by exact path, session, 
 4. Inspect `git status --short`, current diffs, and each authoritative file or symbol.
 5. Treat live repository and goal state as authoritative.
 6. Continue the recorded goal objective only when needed; never replace an unrelated active goal.
-7. Run the recorded `resume_validation.command`, confirm its exact expected observable, and use `transfer_control.py verify` with the bound `next_action` and `resume_validation` values.
+7. Run `transfer_control.py status --source-session-id <expected-session>` first to obtain the bound destination session/task IDs. Run the recorded `resume_validation.command`, confirm its exact expected observable, and use `transfer_control.py verify` with the bound IDs, `next_action`, and `resume_validation` values.
 8. Acknowledge exactly once, request/record supported source stop behavior, and wait for `can_continue:true` before substantial implementation.
 9. Execute the capsule's exact next action, then refresh the session revision.
 

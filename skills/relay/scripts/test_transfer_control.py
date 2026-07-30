@@ -116,6 +116,46 @@ class TransferControlTests(unittest.TestCase):
         self.verify(transfer_id)
         return transfer_id, self.exact(transfer_id)
 
+    def test_unrelated_source_ignores_existing_ownership_for_status_and_prepare(
+        self,
+    ) -> None:
+        transfer_id, exact = self.ready_for_ack()
+        transfer_control.acknowledge(self.repo, **exact)
+        unrelated_source = "unrelated-source-session"
+
+        status = transfer_control.status(
+            self.repo,
+            source_session_id=unrelated_source,
+        )
+
+        self.assertIsNone(status["transfer"])
+        self.assertIsNone(status["phase"])
+        self.assertIsNone(status["ownership"])
+
+        unrelated_paths = transfer_control.transfer_paths(
+            self.repo,
+            unrelated_source,
+        )
+        unrelated_capsule = unrelated_paths.session_dir / "capsule.md"
+        unrelated_capsule.parent.mkdir(parents=True)
+        unrelated_capsule.write_text("unrelated ready capsule\n", encoding="utf-8")
+        prepared = transfer_control.prepare(
+            self.repo,
+            source_session_id=unrelated_source,
+            goal_identity="goal:sha256:unrelated",
+            capsule_path=str(unrelated_capsule),
+            capsule_revision=1,
+            capsule_sha256=hashlib.sha256(unrelated_capsule.read_bytes()).hexdigest(),
+            resume_ready=True,
+            next_action="Run the unrelated focused transfer test",
+            validation_evidence=[],
+            resume_validation_command=self.VALIDATION_COMMAND,
+            resume_validation_expected=self.VALIDATION_EXPECTED,
+            nonce="abcdefghijklmnopqrstuvwxyz012345",
+        )
+
+        self.assertEqual(prepared["source_session_id"], unrelated_source)
+
     def test_prepare_is_idempotent_for_same_revision_and_capsule(self) -> None:
         first = self.prepare()
         second = self.prepare(nonce="abcdefghijklmnopqrstuvwxyz012345")

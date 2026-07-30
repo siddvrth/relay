@@ -529,6 +529,13 @@ def _source_may_prepare(paths: TransferPaths, source_session_id: str) -> None:
         return
     ownership_paths = transfer_paths(paths.root.parent.parent.parent, str(ownership.get("source_session_id", "")))
     _validate_ownership(ownership_paths, ownership)
+    ownership_identities = {
+        ownership.get("source_session_id"),
+        ownership.get("destination_session_id"),
+        ownership.get("sole_writer_session_id"),
+    }
+    if source_session_id not in ownership_identities:
+        return
     if (
         ownership.get("destination_session_id") == source_session_id
         and _ownership_can_continue(ownership)
@@ -1615,9 +1622,23 @@ def status(repo: Path, *, source_session_id: str) -> dict[str, Any]:
     paths = transfer_paths(repo, source_session_id)
     with _locked(paths.lock):
         ownership = _load_json(paths.ownership)
-        if ownership:
-            record = _record_from_ownership(paths, ownership, repair_projection=True)
+        ownership_identities = {
+            ownership.get("source_session_id"),
+            ownership.get("destination_session_id"),
+            ownership.get("sole_writer_session_id"),
+        }
+        if ownership and source_session_id in ownership_identities:
+            owner_paths = transfer_paths(
+                repo,
+                str(ownership.get("source_session_id", "")),
+            )
+            record = _record_from_ownership(
+                owner_paths,
+                ownership,
+                repair_projection=True,
+            )
         else:
+            ownership = {}
             try:
                 record = _active_record(paths)
             except TransferError as error:
@@ -1958,6 +1979,67 @@ def _trusted_python_interpreter(raw_interpreter: str) -> bool:
     return interpreter in trusted
 
 
+def _trusted_transfer_scripts(repo: Path) -> set[Path]:
+    installed_script = Path(__file__).resolve(strict=True)
+    trusted = {installed_script}
+    installed_bytes = installed_script.read_bytes()
+    for candidate in (
+        repo / "skills/relay/scripts/transfer_control.py",
+        repo / ".agents/skills/relay/scripts/transfer_control.py",
+    ):
+        try:
+            resolved = candidate.resolve(strict=True)
+            if resolved.is_file() and resolved.read_bytes() == installed_bytes:
+                trusted.add(resolved)
+        except OSError:
+            continue
+    return trusted
+
+
+def _resolve_hook_path(repo: Path, raw_path: str, *, strict: bool = False) -> Path:
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = repo / candidate
+    return candidate.resolve(strict=strict)
+
+
+def _parse_transfer_help_command(repo: Path, words: Sequence[str]) -> bool:
+    if not words:
+        return False
+    if Path(words[0]).name in {"python", "python3", "python3.14"}:
+        if not _trusted_python_interpreter(words[0]) or len(words) < 3:
+            return False
+        script_index = 1
+    else:
+        script_index = 0
+    try:
+        script = _resolve_hook_path(repo, words[script_index], strict=True)
+    except OSError:
+        return False
+    if script not in _trusted_transfer_scripts(repo):
+        return False
+    arguments = list(words[script_index + 1 :])
+    if arguments == ["--help"]:
+        return True
+    if (
+        len(arguments) == 2
+        and arguments[0] in _HOOK_CONTROL_ACTIONS
+        and arguments[1] == "--help"
+    ):
+        return True
+    if (
+        len(arguments) == 4
+        and arguments[0] == "--repo"
+        and arguments[2] in _HOOK_CONTROL_ACTIONS
+        and arguments[3] == "--help"
+    ):
+        try:
+            return _resolve_hook_path(repo, arguments[1]) == repo.resolve()
+        except OSError:
+            return False
+    return False
+
+
 def _parse_bound_control_command(
     repo: Path,
     command: str,
@@ -1971,7 +2053,6 @@ def _parse_bound_control_command(
         return False
     if len(words) < 5:
         return False
-    script = Path(__file__).resolve()
     if Path(words[0]).name in {"python", "python3", "python3.14"}:
         if not _trusted_python_interpreter(words[0]):
             return False
@@ -1979,19 +2060,25 @@ def _parse_bound_control_command(
     else:
         script_index = 0
     try:
-        if Path(words[script_index]).expanduser().resolve(strict=True) != script:
+        command_script = _resolve_hook_path(
+            repo,
+            words[script_index],
+            strict=True,
+        )
+        if command_script not in _trusted_transfer_scripts(repo):
             return False
     except OSError:
         return False
     arguments = words[script_index + 1 :]
-    if len(arguments) < 3 or arguments[0] != "--repo":
-        return False
-    try:
-        if Path(arguments[1]).expanduser().resolve() != repo.resolve():
+    if arguments and arguments[0] == "--repo":
+        if len(arguments) < 3:
             return False
-    except OSError:
-        return False
-    arguments = arguments[2:]
+        try:
+            if _resolve_hook_path(repo, arguments[1]) != repo.resolve():
+                return False
+        except OSError:
+            return False
+        arguments = arguments[2:]
     if not arguments or arguments[0] not in _HOOK_CONTROL_ACTIONS:
         return False
     action = arguments[0]
@@ -2059,23 +2146,8 @@ def _parse_readonly_repo_command(
         ("git", "rev-parse", "--show-toplevel"),
     }
     if tuple(words) not in allowed:
-        if (
-            len(words) == 3
-            and _trusted_python_interpreter(words[0])
-            and words[2] == "--help"
-        ):
-            script = Path(words[1]).expanduser().resolve()
-            installed_script = Path(__file__).resolve()
-            repo_script = (repo / "skills/relay/scripts/transfer_control.py").resolve()
-            known_scripts = {
-                installed_script,
-            }
-            if (
-                repo_script.is_file()
-                and repo_script.read_bytes() == installed_script.read_bytes()
-            ):
-                known_scripts.add(repo_script)
-            return script in known_scripts and script.is_file()
+        if _parse_transfer_help_command(repo, words):
+            return True
         if (
             binding
             and len(words) == 4
@@ -2083,7 +2155,28 @@ def _parse_readonly_repo_command(
             and re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)?p", words[2])
         ):
             try:
-                target = Path(words[3]).expanduser().resolve()
+                target = _resolve_hook_path(repo, words[3])
+                capsule = Path(str(binding["capsule_path"])).expanduser().resolve()
+            except (KeyError, OSError):
+                return False
+            readable_files = {
+                capsule,
+                (repo / "AGENTS.md").resolve(),
+                (repo / "skills/relay/SKILL.md").resolve(),
+                (repo / ".agents/skills/relay/SKILL.md").resolve(),
+                Path(__file__).resolve(strict=True).parents[1] / "SKILL.md",
+            }
+            return target in readable_files and target.is_file()
+        digest_target = None
+        if len(words) == 4 and words[:3] == ["shasum", "-a", "256"]:
+            digest_target = words[3]
+        elif len(words) == 2 and words[0] == "sha256sum":
+            digest_target = words[1]
+        elif len(words) == 4 and words[:3] == ["openssl", "dgst", "-sha256"]:
+            digest_target = words[3]
+        if binding and digest_target is not None:
+            try:
+                target = _resolve_hook_path(repo, digest_target)
                 capsule = Path(str(binding["capsule_path"])).expanduser().resolve()
             except (KeyError, OSError):
                 return False
@@ -2117,16 +2210,6 @@ def hook_pretool_decision(repo: Path, payload: Mapping[str, Any]) -> dict[str, A
         if tool_name in _HOOK_READ_ONLY_TOOLS:
             return {}
         if tool_name in _HOOK_CONTROL_TOOLS:
-            try:
-                binding = _control_binding(
-                    repo,
-                    actor_session_id=actor,
-                    source_session_id=source,
-                )
-            except TransferError:
-                binding = {}
-            if binding and _parse_bound_control_command(repo, command, binding):
-                return {}
             workdir = raw_input.get("workdir")
             try:
                 workdir_matches = (
@@ -2135,6 +2218,20 @@ def hook_pretool_decision(repo: Path, payload: Mapping[str, Any]) -> dict[str, A
                 )
             except OSError:
                 workdir_matches = False
+            try:
+                binding = _control_binding(
+                    repo,
+                    actor_session_id=actor,
+                    source_session_id=source,
+                )
+            except TransferError:
+                binding = {}
+            if (
+                workdir_matches
+                and binding
+                and _parse_bound_control_command(repo, command, binding)
+            ):
+                return {}
             if workdir_matches and _parse_readonly_repo_command(repo, command, binding):
                 return {}
     return {

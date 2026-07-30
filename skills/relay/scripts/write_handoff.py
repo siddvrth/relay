@@ -801,7 +801,7 @@ def build_continuation_prompt(
         f"Exact next action: {next_action}.",
         f"Resume validation command: {resume_validation_command}.",
         f"Resume validation expected: {resume_validation_expected}.",
-        "transfer_control.py: verify, then acknowledge.",
+        "transfer_control.py: status, verify, then acknowledge.",
         "Source authoritative; destination control-only until exact acknowledgement, then sole writer. Wait for can_continue:true.",
     ]
     mandatory = "\n".join(mandatory_lines)

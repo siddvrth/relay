@@ -456,6 +456,10 @@ class WriteHandoffTests(unittest.TestCase):
             "exit 0 and 7 tests pass",
         ):
             self.assertIn(value, prompt)
+        self.assertIn(
+            "transfer_control.py: status, verify, then acknowledge.",
+            prompt,
+        )
 
     def test_validation_evidence_round_trips_independently_from_resume_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

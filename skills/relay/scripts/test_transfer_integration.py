@@ -205,6 +205,15 @@ class TransferIntegrationTests(unittest.TestCase):
 
     def test_pending_destination_is_discovered_without_source_in_hook_payload(self) -> None:
         _transfer_id, exact = self.bind_destination()
+        installed_transfer = (
+            self.repo / ".agents/skills/relay/scripts/transfer_control.py"
+        )
+        installed_transfer.parent.mkdir(parents=True)
+        shutil.copyfile(TRANSFER, installed_transfer)
+        installed_skill = self.repo / ".agents/skills/relay/SKILL.md"
+        shutil.copyfile(REPO / "skills/relay/SKILL.md", installed_skill)
+        agents_file = self.repo / "AGENTS.md"
+        agents_file.write_text("# Test instructions\n", encoding="utf-8")
         prompt = self.run_hook(
             PLUGIN_HOOK,
             "UserPromptSubmit",
@@ -236,9 +245,36 @@ class TransferIntegrationTests(unittest.TestCase):
             },
         )
         self.assertEqual(allowed, {})
+        allowed_implicit_repo = self.run_hook(
+            PLUGIN_HOOK,
+            "PreToolUse",
+            {
+                "session_id": self.DESTINATION,
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": (
+                        f"python3 {TRANSFER} status"
+                        f" --source-session-id {self.SOURCE}"
+                    ),
+                    "workdir": str(self.repo),
+                },
+            },
+        )
+        self.assertEqual(allowed_implicit_repo, {})
         for command in (
             f"sed -n 1,160p {self.capsule}",
+            f"sed -n 1,260p {installed_skill}",
+            f"sed -n 1,260p {agents_file}",
+            f"shasum -a 256 {self.capsule}",
+            f"sha256sum {self.capsule}",
+            f"openssl dgst -sha256 {self.capsule}",
             f"python3 {TRANSFER} --help",
+            f"python3 {installed_transfer} --help",
+            "python3 .agents/skills/relay/scripts/transfer_control.py --help",
+            (
+                "python3 .agents/skills/relay/scripts/transfer_control.py"
+                f" --repo {self.repo} verify --help"
+            ),
         ):
             readonly = self.run_hook(
                 PLUGIN_HOOK,
@@ -375,6 +411,52 @@ class TransferIntegrationTests(unittest.TestCase):
             },
         )
         self.assertEqual(allowed_ack, {})
+        installed_acknowledge = exact_acknowledge.replace(
+            str(TRANSFER),
+            str(installed_transfer),
+        )
+        allowed_installed_ack = self.run_hook(
+            PLUGIN_HOOK,
+            "PreToolUse",
+            {
+                "session_id": self.DESTINATION,
+                "tool_name": "Bash",
+                "tool_input": {"command": installed_acknowledge},
+            },
+        )
+        self.assertEqual(allowed_installed_ack, {})
+        allowed_relative_installed_ack = self.run_hook(
+            PLUGIN_HOOK,
+            "PreToolUse",
+            {
+                "session_id": self.DESTINATION,
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": installed_acknowledge.replace(
+                        str(installed_transfer),
+                        ".agents/skills/relay/scripts/transfer_control.py",
+                    ),
+                    "workdir": str(self.repo),
+                },
+            },
+        )
+        self.assertEqual(allowed_relative_installed_ack, {})
+        allowed_implicit_repo_ack = self.run_hook(
+            PLUGIN_HOOK,
+            "PreToolUse",
+            {
+                "session_id": self.DESTINATION,
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": installed_acknowledge.replace(
+                        f" --repo {self.repo}",
+                        "",
+                    ),
+                    "workdir": str(self.repo),
+                },
+            },
+        )
+        self.assertEqual(allowed_implicit_repo_ack, {})
         wrong_nonce = self.run_hook(
             PLUGIN_HOOK,
             "PreToolUse",
