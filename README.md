@@ -1,26 +1,9 @@
 # Relay
 
-Relay is a Codex plugin for long-running Goal Mode work. Its `relay` skill serializes the current working state into a bounded, self-contained capsule so a clean task can resume without the old transcript.
+Relay is a Codex plugin designed as an alternative to [`/compact`](https://learn.chatgpt.com/docs/developer-commands#keep-transcripts-lean-with-compact) for long-running Goal Mode work. Its `relay` skill serializes the current working state into a bounded, self-contained capsule so a clean task can resume without the old transcript.
 
 Generic handoff tools transfer one session into another. Relay is automatic, verified, repeatable clean-context rotation for persistent Codex goals.
 
-The product, plugin, and skill are all named `relay`.
-
-```text
-/goal Build X
-    ↓
-work
-    ↓
-Relay
-    ↓
-clean context
-    ↓
-same goal continues
-    ↓
-repeat as needed
-    ↓
-done
-```
 
 ### `/relay` vs `/compact`
 
