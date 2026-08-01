@@ -18,11 +18,11 @@ check_dir() {
     return
   fi
 
-  if diff -qr -x __pycache__ -x '*.pyc' -x .DS_Store "$source_dir" "$target_dir" >/dev/null; then
+  if diff -qr -x __pycache__ -x '*.pyc' -x .DS_Store -x .omx -x .omo "$source_dir" "$target_dir" >/dev/null; then
     echo "OK $label"
   else
     echo "DRIFT $label"
-    diff -qr -x __pycache__ -x '*.pyc' -x .DS_Store "$source_dir" "$target_dir" || true
+    diff -qr -x __pycache__ -x '*.pyc' -x .DS_Store -x .omx -x .omo "$source_dir" "$target_dir" || true
     failures=$((failures + 1))
   fi
 }

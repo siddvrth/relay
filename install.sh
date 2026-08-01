@@ -125,10 +125,11 @@ PREVIOUS_HOOK="$STAGE_ROOT/previous-hook"
 # Stage and verify skill + hook before touching live paths.
 cp -R "$PKG/skills/relay" "$STAGED_SKILL"
 rm -f "$STAGED_SKILL/.DS_Store" "$STAGED_SKILL/scripts/.DS_Store"
+rm -rf "$STAGED_SKILL/.omx" "$STAGED_SKILL/.omo"
 rm -rf "$STAGED_SKILL/scripts/__pycache__"
 cp "$PKG/codex/relay_hook.sh" "$STAGED_HOOK"
 chmod +x "$STAGED_HOOK"
-diff -qr -x __pycache__ -x '*.pyc' -x .DS_Store \
+diff -qr -x __pycache__ -x '*.pyc' -x .DS_Store -x .omx -x .omo \
   "$PKG/skills/relay" "$STAGED_SKILL" >/dev/null
 cmp -s "$PKG/codex/relay_hook.sh" "$STAGED_HOOK"
 PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile "$STAGED_SKILL/scripts/"*.py

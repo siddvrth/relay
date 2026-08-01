@@ -117,6 +117,11 @@ class FreshReleaseConsumerTests(unittest.TestCase):
             self.assert_passed(extracted)
             package = extraction / f"relay-{manifest['version']}"
             self.assertTrue(package.is_dir())
+            dirty_runtime = package / "skills" / "relay" / ".omx"
+            dirty_runtime.mkdir()
+            (dirty_runtime / "session.json").write_text(
+                '{"runtime":"must not install"}\n', encoding="utf-8"
+            )
             archive_scripts = package / "skills" / "relay" / "scripts"
             imported = run(
                 [
@@ -160,6 +165,9 @@ class FreshReleaseConsumerTests(unittest.TestCase):
             self.assert_passed(run(["git", "init", "-q"], consumer))
             self.assert_passed(run(["bash", str(package / "install.sh"), str(consumer)]))
             self.assert_passed(run(["bash", str(package / "audit_install.sh"), str(consumer)]))
+            self.assertFalse(
+                (consumer / ".agents" / "skills" / "relay" / ".omx").exists()
+            )
             gate_environment = dict(os.environ)
             gate_environment["RELAY_SKIP_RELEASE_CONSUMER"] = "1"
             self.assert_passed(
