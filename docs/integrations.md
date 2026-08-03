@@ -39,7 +39,7 @@ The adapters keep internal and official JSON separate:
 | `PreCompact` | Common fields reporting a refreshed checkpoint only |
 | `Stop` | Common output fields only |
 
-Internal capsule paths, metrics, guards, overflow records, delivery details, and V3 observation rows do not leak into official stdout unless the schema allows them. Adapters must not fabricate unavailable acknowledgement, stop, latency, token, or intervention telemetry. Errors fail open. `PreToolUse` emits `{}` when no event-specific output is required; other events use their documented common fields.
+Internal capsule paths, guards, overflow records, and delivery details do not leak into official stdout unless the schema allows them. Adapters must not fabricate unavailable acknowledgement or stop results. Errors fail open. `PreToolUse` emits `{}` when no event-specific output is required; other events use their documented common fields.
 
 ## Plugin-Bundled Hooks
 
@@ -77,12 +77,12 @@ The CLI adapter can checkpoint and emit allowed hook context. Automatic clean-ta
 | Codex App without thread tools | Yes | When hooks run | No | Host-dependent |
 | Codex CLI/OMX | Yes | Yes | Requires agent orchestration | `/hooks` |
 
-Cross-surface parity means equivalent normalized kernel, metrics, readiness, revision, delivery decisions, and aggregate chain accounting when telemetry exists. Unavailable host telemetry stays explicit rather than inferred. Parity does not mean byte-identical hook stdout where event schemas differ.
+Cross-surface parity means equivalent normalized kernel, readiness, revision, and delivery decisions. Unavailable host telemetry stays explicit rather than inferred. Parity does not mean byte-identical hook stdout where event schemas differ.
 
 ## Integration Invariants
 
 - Scope active state, revision, lock, pointer, and delivery record by `session_id`.
-- Keep capsule and prompt budgets independent from the experimental threshold.
+- Keep capsule and prompt budgets independent from the context threshold.
 - Emit at most one prompt copy per transport; never store that text in capsule or pointers.
 - Do not switch from `resume_ready:false`.
 - Do not use repo-latest metadata as cross-session authority.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the plugin/skill layout has no undeclared dependencies."""
+"""Check the plugin and skill layout has no undeclared dependencies."""
 
 from __future__ import annotations
 
@@ -17,17 +17,6 @@ MANIFEST = ROOT / ".codex-plugin" / "plugin.json"
 HOOKS = ROOT / "hooks" / "hooks.json"
 RELEASE_POLICY = ROOT / ".codex-plugin" / "release-policy.json"
 SKILLS = ROOT / "skills"
-sys.path.insert(0, str(SKILLS / "relay" / "scripts"))
-from goal_telemetry_report import (  # noqa: E402
-    V2_SCHEMA_VERSION,
-    V2_STUDY_TYPE,
-    V3_SCHEMA_VERSION,
-    V3_STUDY_TYPE,
-    build_v2_report,
-    build_v3_report,
-    validate_study_document,
-    validate_v3_study_document,
-)
 
 
 def fail(message: str) -> NoReturn:
@@ -55,142 +44,14 @@ def validate_skill(path: Path) -> None:
         if ":" in line
     }
     if set(fields) != {"name", "description"}:
-        fail(f"skill frontmatter must contain only name and description: {path.relative_to(ROOT)}")
+        fail(
+            "skill frontmatter must contain only name and description: "
+            f"{path.relative_to(ROOT)}"
+        )
     if fields["name"] != path.parent.name:
         fail(f"skill name must match directory: {path.relative_to(ROOT)}")
     if not fields["description"]:
         fail(f"skill description is empty: {path.relative_to(ROOT)}")
-
-
-def valid_nonnegative_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
-
-
-def relative_display(path: Path, root: Path) -> str:
-    try:
-        return str(path.relative_to(root))
-    except ValueError:
-        return str(path)
-
-
-def validate_legacy_goal_telemetry(
-    document: dict[str, object],
-    path: Path,
-    *,
-    root: Path = ROOT,
-) -> None:
-    display = relative_display(path, root)
-    if document.get("schema_version") != 1:
-        fail(f"historical goal telemetry schema_version must be 1: {display}")
-    trials = document.get("trials")
-    if not isinstance(trials, list) or not trials:
-        fail(f"historical goal telemetry must contain trial rows: {display}")
-    seen_pairs: set[int] = set()
-    seen_ids: set[str] = set()
-    for index, trial in enumerate(trials):
-        if not isinstance(trial, dict):
-            fail(f"historical goal telemetry row {index} must be an object")
-        required = {
-            "pair",
-            "trial_id",
-            "task_shape",
-            "clean_tokens",
-            "fork_tokens",
-            "quality_match",
-        }
-        missing = sorted(required - set(trial))
-        if missing:
-            fail(
-                f"historical goal telemetry row {index} missing {', '.join(missing)}"
-            )
-        pair = trial["pair"]
-        trial_id = trial["trial_id"]
-        if not isinstance(pair, int) or isinstance(pair, bool) or pair < 1:
-            fail(f"historical goal telemetry row {index} pair must be a positive integer")
-        if pair in seen_pairs:
-            fail(f"historical goal telemetry pair {pair} is duplicated")
-        seen_pairs.add(pair)
-        if not isinstance(trial_id, str) or not trial_id.strip():
-            fail(f"historical goal telemetry row {index} trial_id must be non-empty")
-        if trial_id in seen_ids:
-            fail(f"historical goal telemetry trial_id {trial_id} is duplicated")
-        seen_ids.add(trial_id)
-        if not isinstance(trial["task_shape"], str) or not trial["task_shape"].strip():
-            fail(f"historical goal telemetry row {index} task_shape must be non-empty")
-        for key in ("clean_tokens", "fork_tokens"):
-            if not valid_nonnegative_int(trial[key]):
-                fail(f"historical goal telemetry row {index} {key} must be non-negative")
-        if not isinstance(trial["quality_match"], bool):
-            fail(f"historical goal telemetry row {index} quality_match must be boolean")
-        if "quality_note" in trial and not isinstance(trial["quality_note"], str):
-            fail(f"historical goal telemetry row {index} quality_note must be text")
-
-
-def validate_goal_telemetry_artifacts(root: Path = ROOT) -> dict[str, int]:
-    metrics_root = root / "artifacts" / "metrics"
-    if not metrics_root.is_dir():
-        return {
-            "historical_trial_count": 0,
-            "v2_study_count": 0,
-            "v3_study_count": 0,
-        }
-
-    historical_trial_count = 0
-    v2_count = 0
-    v3_count = 0
-    for path in sorted(metrics_root.glob("*.json")):
-        if path.name == "live-hooks-trust.json":
-            continue
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            fail(f"invalid JSON at {path.relative_to(root)}: {exc}")
-        if not isinstance(value, dict):
-            fail(f"expected object at {path.relative_to(root)}")
-        if value.get("schema_version") == 1 and isinstance(value.get("trials"), list):
-            validate_legacy_goal_telemetry(value, path, root=root)
-            historical_trial_count += len(value["trials"])
-            continue
-        identity = (value.get("schema_version"), value.get("study_type"))
-        v2_marker = (
-            value.get("schema_version") == V2_SCHEMA_VERSION
-            or value.get("study_type") == V2_STUDY_TYPE
-        )
-        v3_marker = (
-            value.get("schema_version") == V3_SCHEMA_VERSION
-            or value.get("study_type") == V3_STUDY_TYPE
-        )
-        if not v2_marker and not v3_marker:
-            continue
-        if identity == (V2_SCHEMA_VERSION, V2_STUDY_TYPE):
-            try:
-                validate_study_document(value)
-                build_v2_report(value)
-            except ValueError as exc:
-                fail(f"invalid v2 goal telemetry at {path.relative_to(root)}: {exc}")
-            v2_count += 1
-        elif identity == (V3_SCHEMA_VERSION, V3_STUDY_TYPE):
-            try:
-                validate_v3_study_document(value)
-                build_v3_report(value)
-            except ValueError as exc:
-                fail(f"invalid v3 goal telemetry at {path.relative_to(root)}: {exc}")
-            v3_count += 1
-        elif v3_marker:
-            fail(
-                f"invalid v3 goal telemetry at {path.relative_to(root)}: "
-                "mixed or partial schema/type markers"
-            )
-        else:
-            fail(
-                f"invalid v2 goal telemetry at {path.relative_to(root)}: "
-                "mixed or partial schema/type markers"
-            )
-    return {
-        "historical_trial_count": historical_trial_count,
-        "v2_study_count": v2_count,
-        "v3_study_count": v3_count,
-    }
 
 
 def validate() -> None:
@@ -246,8 +107,6 @@ def validate() -> None:
     )
     if "[TODO:" in distribution_text:
         fail("distribution contains TODO placeholders")
-
-    validate_goal_telemetry_artifacts(ROOT)
 
 
 def main() -> int:

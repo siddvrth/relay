@@ -15,12 +15,6 @@ from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(
-    0,
-    str(ROOT / "skills" / "relay" / "scripts"),
-)
-
-
 RELEASE_POLICY_KEYS = {
     "schema_version",
     "release_mode",
@@ -30,47 +24,6 @@ RELEASE_POLICY_KEYS = {
 LIVE_HOOK_ADAPTERS = (
     "hooks/relay_hook.sh",
     "codex/relay_hook.sh",
-    "scripts/workflow/relay_hook.sh",
-)
-# Sort order is part of the digest; do not reorder.
-RUNTIME_BINDING_PATHS = tuple(
-    sorted(
-        (
-            ".codex-plugin/plugin.json",
-            "skills/relay/SKILL.md",
-            "skills/relay/reference.md",
-            "skills/relay/examples.md",
-            "skills/relay/agents/openai.yaml",
-            "skills/relay/scripts/write_handoff.py",
-            "skills/relay/scripts/context_handoff.py",
-            "skills/relay/scripts/context_usage.py",
-            "skills/relay/scripts/codex_app_delivery_state.py",
-            "skills/relay/scripts/codex_app_jsonrpc.py",
-            "skills/relay/scripts/codex_app_protocol.py",
-            "skills/relay/scripts/codex_app_transport.py",
-            "skills/relay/scripts/codex_app_worker.py",
-            "skills/relay/scripts/transfer_control.py",
-            "skills/relay/scripts/goal_telemetry_report.py",
-            "skills/relay/scripts/goal_telemetry_v3.py",
-            "skills/relay/scripts/goal_telemetry_v3_contract.py",
-            "skills/relay/scripts/goal_telemetry_v3_report.py",
-            "skills/relay/scripts/goal_telemetry_v3_schema.py",
-            "scripts/check_release_readiness.py",
-            "scripts/validate_distribution.py",
-            "hooks/hooks.json",
-            *LIVE_HOOK_ADAPTERS,
-            "install.sh",
-            "audit_install.sh",
-            "repair_active_install.sh",
-            "completion_gate.sh",
-        )
-    )
-)
-PREREGISTRATION_ARTIFACTS = (
-    "task_set",
-    "randomization_plan",
-    "rubric",
-    "analysis_plan",
 )
 PUBLIC_TEXT_PATTERNS = (
     "**/*.md",
@@ -195,14 +148,6 @@ PUSH_BRANCHES_PATTERN = re.compile(
     r"^    branches:\s*$\n"
     r"(?P<branches>(?:^      -\s+.+$\n?)+)",
     re.MULTILINE,
-)
-from goal_telemetry_report import (  # noqa: E402
-    V2_SCHEMA_VERSION,
-    V2_STUDY_TYPE,
-    V3_SCHEMA_VERSION,
-    V3_STUDY_TYPE,
-    build_v2_report,
-    build_v3_report,
 )
 
 
@@ -504,256 +449,6 @@ def scan_positive_public_claims(root: Path) -> list[str]:
     return findings
 
 
-def experimental_non_claim_release(root: Path) -> bool:
-    return bool(assess_release_policy(root)["valid"]) and not scan_positive_public_claims(root)
-
-
-def _git_blob(root: Path, revision: str, path: str) -> bytes:
-    result = subprocess.run(
-        ["git", "show", f"{revision}:{path}"],
-        cwd=root,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise ValueError(f"{path} is unavailable at commit {revision}")
-    return result.stdout
-
-
-def _git_regular_blob(
-    root: Path,
-    revision: str,
-    path: str,
-    label: str,
-) -> tuple[str, bytes]:
-    entry = git("ls-tree", revision, "--", path, root=root)
-    fields = entry.stdout.split(maxsplit=3) if entry.returncode == 0 else []
-    if len(fields) != 4 or fields[0] not in {"100644", "100755"} or fields[1] != "blob":
-        raise ValueError(f"{label} {path} is not a regular tracked blob")
-    return fields[0], _git_blob(root, revision, path)
-
-
-def _digest_runtime_entries(entries: Iterator[tuple[str, str, bytes]]) -> str:
-    digest = hashlib.sha256(b"relay-runtime-binding-v2\0")
-    for path, mode, content in entries:
-        encoded_path = path.encode("utf-8")
-        digest.update(encoded_path)
-        digest.update(b"\0")
-        digest.update(mode.encode("ascii"))
-        digest.update(b"\0")
-        digest.update(str(len(content)).encode("ascii"))
-        digest.update(b"\0")
-        digest.update(content)
-    return digest.hexdigest()
-
-
-def runtime_digest_at_commit(root: Path, commit: str) -> str:
-    def entry(path: str) -> tuple[str, str, bytes]:
-        mode, content = _git_regular_blob(root, commit, path, "runtime file")
-        return path, mode, content
-
-    return _digest_runtime_entries(
-        entry(path) for path in RUNTIME_BINDING_PATHS
-    )
-
-
-def current_runtime_digest(root: Path) -> str:
-    entries: list[tuple[str, str, bytes]] = []
-    for relative in RUNTIME_BINDING_PATHS:
-        path = root / relative
-        try:
-            if path.is_symlink() or not path.is_file():
-                raise ValueError(f"current runtime file {relative} is not a regular file")
-            mode = "100755" if path.stat().st_mode & 0o111 else "100644"
-            content = path.read_bytes()
-        except OSError as exc:
-            raise ValueError(f"current runtime file {relative} is unavailable: {exc}") from exc
-        entries.append((relative, mode, content))
-    return _digest_runtime_entries(iter(entries))
-
-
-def _resolved_commit(root: Path, declared: object, label: str) -> str:
-    result = git("rev-parse", "--verify", f"{declared}^{{commit}}", root=root)
-    if result.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", result.stdout.strip()):
-        raise ValueError(f"{label} does not resolve to a real commit")
-    return result.stdout.strip()
-
-
-def _require_ancestor(root: Path, ancestor: str, descendant: str, label: str) -> None:
-    result = git("merge-base", "--is-ancestor", ancestor, descendant, root=root)
-    if result.returncode != 0:
-        raise ValueError(label)
-
-
-def _validate_evidence_binding(
-    root: Path,
-    document: dict[str, object],
-) -> dict[str, str]:
-    control = _resolved_commit(root, document["control_commit_id"], "control_commit_id")
-    candidate = _resolved_commit(root, document["candidate_commit_id"], "candidate_commit_id")
-    head = _resolved_commit(root, "HEAD", "release HEAD")
-    _require_ancestor(
-        root,
-        control,
-        candidate,
-        "control commit is not an ancestor of candidate commit",
-    )
-    _require_ancestor(
-        root,
-        candidate,
-        head,
-        "candidate commit is not an ancestor of release HEAD",
-    )
-    origin = git("remote", "get-url", "origin", root=root)
-    if origin.returncode != 0 or document["repository"] != origin.stdout.strip():
-        raise ValueError("study repository does not match the release origin remote")
-
-    control_digest = runtime_digest_at_commit(root, control)
-    candidate_digest = runtime_digest_at_commit(root, candidate)
-    release_digest = current_runtime_digest(root)
-    if document["control_runtime_sha256"] != control_digest:
-        raise ValueError("declared control runtime digest does not match control commit")
-    if document["candidate_runtime_sha256"] != candidate_digest:
-        raise ValueError("declared candidate runtime digest does not match candidate commit")
-    if release_digest != candidate_digest:
-        raise ValueError("release runtime has drifted from the candidate commit")
-
-    status = git("status", "--porcelain=v1", "-uall", root=root)
-    if status.returncode != 0 or status.stdout.strip():
-        raise ValueError("release working tree must be clean for evidence binding")
-
-    preregistration = document["preregistration"]
-    if not isinstance(preregistration, dict):
-        raise ValueError("preregistration must be an object")
-    for stem in PREREGISTRATION_ARTIFACTS:
-        path = str(preregistration[f"{stem}_path"])
-        expected_digest = str(preregistration[f"{stem}_sha256"])
-        _, candidate_content = _git_regular_blob(
-            root, candidate, path, "preregistration artifact"
-        )
-        _, head_content = _git_regular_blob(
-            root, head, path, "preregistration artifact"
-        )
-        tracked = git("ls-files", "--error-unmatch", "--", path, root=root)
-        if tracked.returncode != 0:
-            raise ValueError(f"preregistration artifact {path} is not tracked at release HEAD")
-        try:
-            current_path = root / path
-            if current_path.is_symlink() or not current_path.is_file():
-                raise ValueError(
-                    f"preregistration artifact {path} is not a regular current file"
-                )
-            current_content = current_path.read_bytes()
-        except OSError as exc:
-            raise ValueError(f"preregistration artifact {path} is unavailable: {exc}") from exc
-        candidate_artifact_digest = hashlib.sha256(candidate_content).hexdigest()
-        current_artifact_digest = hashlib.sha256(current_content).hexdigest()
-        if candidate_artifact_digest != expected_digest:
-            raise ValueError(
-                f"preregistration artifact {path} hash does not match candidate commit"
-            )
-        if current_artifact_digest != expected_digest:
-            raise ValueError(
-                f"preregistration artifact {path} hash does not match current release tree"
-            )
-        if hashlib.sha256(head_content).hexdigest() != expected_digest:
-            raise ValueError(
-                f"preregistration artifact {path} hash does not match release HEAD"
-            )
-
-    return {
-        "control_commit": control,
-        "candidate_commit": candidate,
-        "release_head": head,
-        "control_runtime_sha256": control_digest,
-        "candidate_runtime_sha256": candidate_digest,
-        "release_runtime_sha256": release_digest,
-        "repository_origin": origin.stdout.strip(),
-    }
-
-
-def assess_empirical_evidence(root: Path) -> dict[str, object]:
-    metrics_root = root / "artifacts" / "metrics"
-    candidates: list[str] = []
-    v2_files: list[str] = []
-    v3_files: list[str] = []
-    valid_v2_reports: list[dict[str, object]] = []
-    valid_v3_reports: list[dict[str, object]] = []
-    passing_v3_reports: list[dict[str, object]] = []
-    verified_bindings: list[dict[str, str]] = []
-    v2_verified_bindings: list[dict[str, str]] = []
-    errors: list[str] = []
-    if metrics_root.is_dir():
-        for path in sorted(metrics_root.glob("*.json")):
-            if path.name == "live-hooks-trust.json":
-                continue
-            try:
-                value = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                errors.append(f"{path.name}: invalid JSON: {exc}")
-                continue
-            if not isinstance(value, dict):
-                continue
-            identity = (value.get("schema_version"), value.get("study_type"))
-            v2_marker = (
-                value.get("schema_version") == V2_SCHEMA_VERSION
-                or value.get("study_type") == V2_STUDY_TYPE
-            )
-            v3_marker = (
-                value.get("schema_version") == V3_SCHEMA_VERSION
-                or value.get("study_type") == V3_STUDY_TYPE
-            )
-            if not v2_marker and not v3_marker:
-                continue
-            candidates.append(path.name)
-            if v2_marker:
-                v2_files.append(path.name)
-            if v3_marker:
-                v3_files.append(path.name)
-            if identity not in {
-                (V2_SCHEMA_VERSION, V2_STUDY_TYPE),
-                (V3_SCHEMA_VERSION, V3_STUDY_TYPE),
-            }:
-                errors.append(
-                    f"{path.name}: mixed or partial telemetry schema/type markers are invalid"
-                )
-                continue
-            try:
-                report = (
-                    build_v2_report(value)
-                    if identity == (V2_SCHEMA_VERSION, V2_STUDY_TYPE)
-                    else build_v3_report(value)
-                )
-                binding = _validate_evidence_binding(root, value)
-            except ValueError as exc:
-                errors.append(f"{path.name}: {exc}")
-                continue
-            if identity == (V2_SCHEMA_VERSION, V2_STUDY_TYPE):
-                valid_v2_reports.append(report)
-                v2_verified_bindings.append(binding)
-            else:
-                valid_v3_reports.append(report)
-                if report["empirical_gate_passed"]:
-                    passing_v3_reports.append(report)
-                    verified_bindings.append(binding)
-
-    gate_passed = bool(passing_v3_reports) and not errors
-    return {
-        "gate_passed": gate_passed,
-        "candidate_files": candidates,
-        "v2_prior_schema_files": v2_files,
-        "v3_candidate_files": v3_files,
-        "valid_v2_study_count": len(valid_v2_reports),
-        "valid_v3_study_count": len(valid_v3_reports),
-        "valid_passing_v3_study_count": len(passing_v3_reports),
-        "valid_passing_study_count": len(passing_v3_reports),
-        "verified_bindings": verified_bindings,
-        "v2_verified_bindings": v2_verified_bindings,
-        "errors": errors,
-        "historical_aggregate_qualifies": False,
-    }
-
-
 def assess_live_hooks_trust(root: Path) -> dict[str, object]:
     path = root / "artifacts" / "metrics" / "live-hooks-trust.json"
     if not path.is_file():
@@ -896,49 +591,10 @@ def assess(root: Path = ROOT) -> dict[str, object]:
     if not (root / "hooks" / "hooks.json").is_file():
         blockers.append("plugin hook manifest is missing")
 
-    if not (root / ".agents" / "plugins" / "marketplace.json").is_file():
-        warnings.append(
-            "no repository marketplace catalog; direct install.sh works, but Git-backed "
-            "plugin marketplace installation is not yet available"
-        )
-
-    warnings.append(
-        "the 30% threshold is an experimental safety policy; realistic multi-step threshold "
-        "calibration is still required before a non-beta effectiveness claim"
-    )
-
-    empirical = assess_empirical_evidence(root)
     live_hooks = assess_live_hooks_trust(root)
     release_policy = assess_release_policy(root)
     positive_claims = scan_positive_public_claims(root)
-    token_claim_blockers: list[str] = []
-    v3_candidate_files = empirical.get("v3_candidate_files")
-    empirical_errors = empirical.get("errors")
-    empirical_gate_passed = empirical.get("gate_passed") is True
-    if not isinstance(v3_candidate_files, list) or not v3_candidate_files:
-        token_claim_blockers.append(
-            "v3 acknowledgement-gated evidence is absent; V2 is prior-schema only"
-        )
-    elif isinstance(empirical_errors, list) and empirical_errors:
-        token_claim_blockers.append(
-            "v3 acknowledgement-gated evidence is invalid: "
-            + "; ".join(str(error) for error in empirical_errors)
-        )
-    elif not empirical_gate_passed:
-        token_claim_blockers.append(
-            "v3 acknowledgement-gated evidence does not pass chain, quality, and token-direction gates"
-        )
-    if not live_hooks["ready"]:
-        token_claim_blockers.append(str(live_hooks["error"]))
 
-    cost_claim_blockers = [
-        "exact usage-category telemetry is unavailable for a cost claim"
-    ]
-    claim_blockers = [*token_claim_blockers, *cost_claim_blockers]
-    token_efficiency_claim_ready = not token_claim_blockers
-    cost_claim_ready = not cost_claim_blockers
-    non_claim = bool(release_policy["valid"]) and not positive_claims
-    release_mode = "experimental_non_claim" if non_claim else "claiming_or_unspecified"
     if not release_policy["valid"]:
         blockers.append(f"release policy invalid: {release_policy['error']}")
     if positive_claims:
@@ -946,26 +602,19 @@ def assess(root: Path = ROOT) -> dict[str, object]:
             "positive token/cost claim appears on public release surface: "
             + ", ".join(positive_claims)
         )
-    if not non_claim:
-        blockers.extend(f"token/cost claim blocked: {item}" for item in claim_blockers)
-    else:
-        warnings.append(
-            "release remains experimental and makes no token- or cost-saving claim; "
-            "claim-only evidence blockers do not block package publication"
-        )
+    if not live_hooks["ready"]:
+        warnings.append(str(live_hooks["error"]))
+
+    non_claim = bool(release_policy["valid"]) and not positive_claims
+    release_mode = "experimental_non_claim" if non_claim else "claiming_or_unspecified"
+    if non_claim:
+        warnings.append("release contains no token- or cost-saving claims")
 
     return {
         "ready": not blockers,
         "blockers": blockers,
         "warnings": warnings,
         "release_mode": release_mode,
-        "token_efficiency_claim_ready": token_efficiency_claim_ready,
-        "cost_claim_ready": cost_claim_ready,
-        "token_cost_claim_ready": (
-            token_efficiency_claim_ready and cost_claim_ready
-        ),
-        "claim_blockers": claim_blockers,
-        "empirical_evidence": empirical,
         "live_hooks_trust": live_hooks,
         "release_policy": release_policy,
         "positive_claims": positive_claims,

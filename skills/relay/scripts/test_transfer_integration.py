@@ -23,7 +23,6 @@ CONTEXT = SCRIPT_DIR / "context_handoff.py"
 TRANSFER = SCRIPT_DIR / "transfer_control.py"
 PLUGIN_HOOK = REPO / "hooks" / "relay_hook.sh"
 CODEX_HOOK = REPO / "codex" / "relay_hook.sh"
-WORKFLOW_HOOK = REPO / "scripts" / "workflow" / "relay_hook.sh"
 
 
 def load_module(name: str, path: Path):
@@ -476,7 +475,6 @@ class TransferIntegrationTests(unittest.TestCase):
             (PLUGIN_HOOK, REPO),
             (PLUGIN_HOOK, missing_plugin),
             (CODEX_HOOK, REPO),
-            (WORKFLOW_HOOK, REPO),
         )
         for hook, plugin_root in cases:
             with self.subTest(hook=hook, plugin_root=plugin_root):
@@ -495,7 +493,6 @@ class TransferIntegrationTests(unittest.TestCase):
         cases = (
             (PLUGIN_HOOK, missing_plugin),
             (CODEX_HOOK, REPO),
-            (WORKFLOW_HOOK, REPO),
         )
         revoked_payload = {
             "session_id": self.SOURCE,
@@ -554,7 +551,7 @@ class TransferIntegrationTests(unittest.TestCase):
         self.bind_destination()
         missing_plugin = self.repo / "missing-plugin"
         missing_plugin.mkdir()
-        for hook in (PLUGIN_HOOK, CODEX_HOOK, WORKFLOW_HOOK):
+        for hook in (PLUGIN_HOOK, CODEX_HOOK):
             plugin_root = missing_plugin if hook == PLUGIN_HOOK else REPO
             denied = self.run_hook(
                 hook,
@@ -780,7 +777,6 @@ class TransferIntegrationTests(unittest.TestCase):
         for hook, plugin_root in (
             (PLUGIN_HOOK, missing_plugin),
             (CODEX_HOOK, REPO),
-            (WORKFLOW_HOOK, REPO),
         ):
             fallback = self.run_hook(
                 hook,

@@ -8,10 +8,10 @@ This is the low-level v2 contract for the `relay` skill. Start with the [project
 | --- | ---: | --- |
 | `--capsule-budget-bytes` | `4096` | Encoded UTF-8 capsule limit; may be lowered, never raised above 4096 |
 | `--prompt-budget-bytes` | `1024` | Transported prompt limit; may be lowered, never raised above 1024 |
-| `--handoff-threshold` | `0.30` | Experimental generic default when compatible host telemetry exists; `0.50` and `0.70` are numeric overrides |
+| `--handoff-threshold` | `0.30` | Default trigger when compatible host telemetry exists; `0.50` and `0.70` are supported numeric overrides |
 | `--dedup-seconds` | `300` | Session-scoped transport cooldown |
 
-Changing a byte budget does not change the threshold. Overrides above the canonical 4096/1024-byte ceilings are rejected before state or delivery is written; official hooks fail open without additional context. Byte counts and `(bytes+3)//4` proxies are storage/transport diagnostics; not evidence of token or cost savings. Capsule readiness does not guarantee transport readiness: the mandatory prompt must fit independently.
+Changing a byte budget does not change the threshold. Overrides above the canonical 4096/1024-byte ceilings are rejected before state or delivery is written; official hooks fail open without additional context. Capsule readiness does not guarantee transport readiness: the mandatory prompt must fit independently.
 
 ## Environment Variables
 
@@ -20,7 +20,7 @@ Changing a byte budget does not change the threshold. Overrides above the canoni
 | `RELAY_OBJECTIVE` | Default `--objective` |
 | `RELAY_NEXT_STEP` | Legacy input-only default for canonical `--next-action`; `--next-step` is also input-only |
 | `RELAY_GOAL_OBJECTIVE` | Goal text for goal-mode handoffs |
-| `RELAY_THRESHOLD` | Override the hook stub's experimental `0.30` trigger ratio |
+| `RELAY_THRESHOLD` | Override the hook stub's `0.30` trigger ratio |
 
 Critical resume state should be passed explicitly or seeded in the session's `.active-task.json`; those three environment variables do not make an incomplete kernel ready.
 
@@ -100,7 +100,7 @@ Ratios accept `0.31`, `31`, or `31%`. Names ending in `Percent`, plus `context_u
 
 These fields are compatibility inputs, not a documented Codex guarantee. When they are absent, `PreToolUse` reads only the final 256 KiB of the documented `transcript_path`, discards partial edge lines, and searches backward for the latest exact `event_msg/token_count` record. The numerator is `info.last_token_usage.input_tokens`; the denominator is the sibling `info.model_context_window`. Cumulative `total_token_usage` is never used. Missing, malformed, out-of-range, or changed schema fails open.
 
-The timing experiment compares exactly six conditions: no proactive handoff, `0.30`, `0.50`, `0.70`, `PreCompact`-only, and milestone. `0.30` is the experimental generic default; `0.50` and `0.70` are numeric overrides, and no threshold is proven optimal. The 4096/1024-byte budgets are independent storage/transport limits and do not alter trigger decisions.
+The `0.30` default is conservative and is not claimed to be optimal for every host. The `0.50` and `0.70` values are supported overrides. The 4096/1024-byte budgets are independent storage/transport limits and do not alter trigger decisions.
 
 ## Internal JSON Contract
 
@@ -157,7 +157,7 @@ Internal JSON is not written directly to a hook's stdout. The adapters translate
 - `PreCompact`: common output fields only; it reports checkpoint refresh and never claims automatic task launch
 - `Stop`: common output fields only; acknowledgement-gated stop state may force `continue:false`
 
-This matches the documented event-specific shapes in [Codex hooks](https://learn.chatgpt.com/docs/hooks). Extra internal metrics never leak into the official envelope. `PreToolUse` emits `{}` when no event-specific output is required; hook errors fail open using each event's documented shape.
+This matches the documented event-specific shapes in [Codex hooks](https://learn.chatgpt.com/docs/hooks). Internal diagnostics never leak into the official envelope. `PreToolUse` emits `{}` when no event-specific output is required; hook errors fail open using each event's documented shape.
 
 The plugin uses the documented default `hooks/hooks.json`, so `.codex-plugin/plugin.json` does not need an explicit `hooks` field. Per [Codex plugin documentation](https://learn.chatgpt.com/docs/build-plugins), installing or enabling the plugin does not trust its non-managed hooks. Use `/hooks` to review and trust the current definitions; a changed hook hash requires review again.
 
@@ -190,12 +190,6 @@ The stub reads one hook JSON object from stdin, calls the installed orchestrator
 - any failure in that transaction restores the prior canonical skill and hook
 - repeated install is idempotent
 - `audit_install.sh` fails on source/installed drift
-
-## Empirical Gate
-
-`goal_telemetry_report.py` analyzes exact goal-period `tokensUsed`, which is not complete context or billing telemetry. V2 evidence requires at least 20 unique task IDs, one per pair; four distinct safe repo-relative preregistration paths and SHA-256 values; an offset-aware `frozen_at`; and an offset-aware `run_started_at` for every row that is strictly post-freeze and passes the future-skew guard. The statistical gate additionally requires every candidate to pass and be ready, quality non-inferiority, positive median savings, and a stable exact sign test.
-
-Release binding resolves the declared control and candidate IDs as real commits, requires control to be an ancestor of candidate and candidate to be an ancestor of release `HEAD`, and requires the declared repository to equal the `origin` URL. A deterministic length-framed SHA-256 covers the frozen shipped runtime path set; declared control/candidate digests must match their commits, and the current runtime must still match candidate. Each preregistration path must be a regular tracked blob with the declared content at candidate, `HEAD`, and the clean current tree. This permits a later evidence-only release commit without permitting runtime or preregistration drift.
 
 ## Troubleshooting
 

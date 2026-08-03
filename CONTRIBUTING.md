@@ -33,7 +33,7 @@ bash completion_gate.sh .
 - README is the front door.
 - `docs/` contains user-facing manuals.
 - `skills/relay/` contains the runtime skill protocol, references, and scripts.
-- `artifacts/` contains sanitized evidence only.
+- `artifacts/` contains the sanitized sample only.
 - `.github/` contains contribution intake and validation wiring.
 
 Do not commit raw handoff capsules from unrelated projects.

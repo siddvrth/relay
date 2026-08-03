@@ -16,7 +16,7 @@ transfer_nonce: <one-use-nonce>
 
 ### Phase / Status
 
-- verification / Runtime is complete; documentation and release evidence are pending.
+- verification / Runtime is complete; documentation and final validation are pending.
 
 ### Next Unfinished Action
 
@@ -34,13 +34,13 @@ transfer_nonce: <one-use-nonce>
 
 - Targeted tests and the full validation gate pass.
 - The live hook definitions are loaded and trusted.
-- Release copy makes no unsupported token or cost claim.
+- Documentation describes the runtime contract accurately.
 
 ### Critical Constraints
 
 - Do not add dependencies.
 - Do not include transcripts, secrets, or private runtime paths.
-- Do not claim token savings before the paired empirical gate passes.
+- Document only verified behavior.
 
 ## Supporting State
 
@@ -92,5 +92,5 @@ sha256: <sha256>
 
 ## Notes
 
-- This committed artifact is sanitized. A production clean task must use the exact runtime path/SHA/source/transfer/goal/revision/nonce identity from its delivery result and verify `resume_ready:true`; it must not discover a checkpoint by timestamp or “latest” name.
+- This committed sample is sanitized. A real transfer must use the exact runtime path/SHA/source/transfer/goal/revision/nonce identity and verify `resume_ready:true`; never choose a checkpoint by timestamp or `latest` name.
 - The continuation prompt is intentionally absent from the capsule and all pointers. Its bounded transport form carries canonical `next_action` and exact `resume_validation` but omits full goal prose.

@@ -34,7 +34,7 @@ Target paths may contain spaces. The installer creates:
 | `scripts/workflow/relay_hook.sh` | Generated Codex CLI/OMX adapter |
 | `.omx/state/relay/` | Untracked, session-scoped runtime state as needed |
 
-Canonical source remains `skills/relay/`; generated `.agents` and workflow copies should be repaired by reinstalling, not edited independently. The complete skill copy includes the V2/V3 telemetry reporters and their tests; installation adds no telemetry dependency.
+Canonical source remains `skills/relay/`; generated `.agents` and workflow copies should be repaired by reinstalling, not edited independently.
 
 Canonical skill and hook surfaces are fully staged, byte-compared, compiled, and syntax-checked before any live change. One install lock covers both canonical swaps. Failure at any transaction step restores the prior skill and hook. Repeated install is idempotent and enforces the 4096-byte capsule and 1024-byte prompt budgets on the installed writer.
 
@@ -51,13 +51,9 @@ Before relying on automatic events:
 3. Confirm the Relay hook source and definitions are loaded.
 4. Review and trust the current hook hashes once.
 5. Recheck after a hook change, because trust is tied to the definition hash.
-6. Exercise `UserPromptSubmit`, `PreToolUse`, `PreCompact`, and `Stop` with a fully seeded transfer and retain sanitized release evidence.
+6. Exercise `UserPromptSubmit`, `PreToolUse`, `PreCompact`, and `Stop` with a fully seeded transfer.
 
 After this one-time setup, normal `/goal` work requires no manual handoff.
-
-Release evidence in `artifacts/metrics/live-hooks-trust.json` is valid only for 24 hours and must bind `schema_version:1`, `evidence_type:"codex_live_hooks_trust"`, `checked_via:"/hooks"`, all four hook events, the current plugin version, the SHA-256 of `hooks/hooks.json`, and SHA-256 values for the plugin, Codex, and workflow adapters.
-
-An unavailable live `/hooks` check is a release-blocking validation gap, not a silent pass.
 
 ## Repair And Re-Audit
 
@@ -83,11 +79,11 @@ bash audit_install.sh "$tmp_repo"
 bash completion_gate.sh "$tmp_repo"
 ```
 
-This proves portable install and repair behavior, including installed V2/V3 telemetry parser parity. It does not create empirical evidence and does not replace the live `/hooks` load/trust check.
+This proves portable install and repair behavior. It does not replace the live `/hooks` load/trust check.
 
 ## Uninstall
 
-After preserving any required runtime evidence:
+After saving any runtime state you need:
 
 ```bash
 rm -rf .agents/skills/relay

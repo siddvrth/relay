@@ -7,7 +7,6 @@ Relay has four layers: plugin distribution, canonical portable source, compatibi
 | Path | Responsibility |
 | --- | --- |
 | `.codex-plugin/plugin.json` | Relay identity and install metadata |
-| `.codex-plugin/release-policy.json` | Exact four-field experimental non-claim policy |
 | `hooks/` | Plugin-bundled lifecycle definitions and adapter |
 | `skills/relay/` | Canonical protocol, reference, examples, and Python runtime |
 | `codex/` | Portable Codex CLI/OMX adapter source |
@@ -36,13 +35,13 @@ Edit canonical source first, then reinstall and audit generated surfaces.
     `-- overflow/<sha256>.json
 ```
 
-The runtime directory is gitignored because it may contain private worktree details. The repo-latest pointer cannot authorize cross-session resume. Pointers contain path/hash, session/revision, delivery state, and authority-facing runtime metrics only; capsule and prompt bodies are excluded. Sanitized V3 study/observation telemetry is a separate release-evidence surface and never authorizes or mutates transfer ownership.
+The runtime directory is gitignored because it may contain private worktree details. The repo-latest pointer cannot authorize cross-session resume. Pointers contain path/hash, session/revision, delivery state, and authority metadata only; capsule and prompt bodies are excluded.
 
 ## Self-Contained Kernel
 
 Every ready revision contains enough critical state to resume independently. Its opening identity kernel carries objective, phase/status, canonical `next_action`, exact `resume_validation.command`/`.expected`, completion condition, and constraints; the middle carries required remaining work and authoritative files plus optional completed work, decisions, blockers, and historical `validation_evidence`; the closing block deliberately repeats action and resume validation with exact source/transfer/goal/revision/nonce identity and the sole-writer-after-acknowledgement rule. Known-empty optional arrays render as one compact absence line rather than filler. The final capsule SHA-256 is necessarily external to the bytes it hashes, so the close requires comparison to the exact transport/pointer/transfer-record digest.
 
-The previous revision is optional evidence. It can help rank changed facts or compute metrics, but it is never an ancestry dependency.
+The previous revision is optional context. It can help explain changes, but it is never an ancestry dependency.
 
 Encoded UTF-8 byte caps are authoritative:
 
@@ -74,7 +73,7 @@ This separation prevents stale state while retaining one delivery per session co
 
 ## Hook Boundary
 
-The internal orchestrator result includes capsule, readiness, revision, metrics, overflow, and delivery data. Official hook stdout is a separate translation:
+The internal orchestrator result includes capsule, readiness, revision, diagnostics, overflow, and delivery data. Official hook stdout is a separate translation:
 
 - a ready `UserPromptSubmit` may invoke the host-side app-server launcher when compatible telemetry is already present, then return only the acknowledged result
 - a ready `PreToolUse` uses the same host-side launcher while preserving its write-authority permission decision
@@ -82,8 +81,6 @@ The internal orchestrator result includes capsule, readiness, revision, metrics,
 - `Stop` uses common fields only
 
 Official [Codex hook documentation](https://learn.chatgpt.com/docs/hooks) documents `transcript_path` but warns that its JSONL format is unstable. Relay therefore accepts compatible telemetry first, then reads only the final 256 KiB of the transcript for the latest exact `event_msg/token_count` record. It uses `last_token_usage.input_tokens`, never cumulative spend, with the sibling effective model window and fails open on schema drift.
-
-V3 aggregate telemetry spans the source-before-handoff, handoff-generation, destination-resume, and completion-after-resume portions of one goal. Accounting does not reset at acknowledgement or session change. Static observability is derived from retained lifecycle events or sanitized study rows; rejected operations are never counted by modifying authoritative acknowledgement, stop, or ownership state.
 
 ## Failure Model
 

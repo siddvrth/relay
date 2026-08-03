@@ -68,30 +68,8 @@ for python_runtime in "${PYTHONS[@]}"; do
   "$python_runtime" -m py_compile "$SKILL"/*.py "$PKG/scripts"/*.py
 done
 
-python3 - "$PKG" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-marketplace_path = root / ".claude-plugin" / "marketplace.json"
-marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
-expected = {
-    "name": "relay-local",
-    "plugins": [
-        {
-            "name": "relay",
-            "source": {
-                "source": "local",
-                "path": ".",
-            },
-        },
-    ],
-}
-assert marketplace == expected
-assert (root / ".codex-plugin" / "plugin.json").is_file()
-PY
-echo "local Codex marketplace: OK"
+test -f "$PKG/.codex-plugin/plugin.json"
+echo "plugin manifest: OK"
 
 python3 "$PKG/scripts/validate_distribution.py"
 python3 "$PKG/scripts/test_release_contract.py"

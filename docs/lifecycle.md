@@ -23,9 +23,7 @@ This state is stored under the hashed session directory, not in a repo-global ac
 
 A manual `/relay`, an automatic `PreToolUse` threshold event, or `PreCompact` can invoke the orchestrator. `PreCompact` is the deterministic last-resort checkpoint when proactive usage cannot be read. Every ready revision is a self-contained capsule at or below 4096 UTF-8 bytes.
 
-The configurable default `0.30` uses compatible hook telemetry when present; otherwise `PreToolUse` reads the latest trustworthy current-input/window pair from a bounded `transcript_path` tail. Missing or changed transcript schema fails open. The margin is motivated by Qwen2.5-7B 40–50% degradation evidence and is not proven optimal for GPT-5.6 or Codex.
-
-Timing experiments compare exactly six conditions: no proactive handoff, `0.30`, `0.50`, `0.70`, `PreCompact`-only, and milestone. The 4096-byte capsule and 1024-byte prompt budgets govern storage/transport fit independently; they do not change the trigger comparison.
+The configurable default `0.30` uses compatible hook telemetry when present; otherwise `PreToolUse` reads the latest current-input/window pair from a bounded `transcript_path` tail. Missing or changed transcript data fails open. The 4096-byte capsule and 1024-byte prompt budgets are independent of the trigger.
 
 Structural guards run before readiness is reported. Critical overflow writes safe metadata with `resume_ready:false` and a content-addressed path/hash; it does not produce a continuation prompt. Optional evidence can overflow while a complete kernel remains ready, unless even the overflow reference cannot fit—in that case compact non-ready metadata is emitted.
 
@@ -74,8 +72,6 @@ The clean task must:
 9. Request and record only an actually supported stop capability. Visible archive/closure is separate. If no trustworthy stop is available, preserve source read-only state plus `termination_pending`.
 10. Wait for `status.can_continue:true`, then execute the exact next action and refresh state with the result.
 
-Goal telemetry, when a preregistered V3 study is running, continues across this boundary. The aggregate total includes source work before handoff, handoff generation, destination resume, and completion after resume. A passing candidate records zero old-source tokens/actions after acknowledgement. Rows without a handoff use explicit `not_applicable` acknowledgement/stop outcomes and null lifecycle latencies; no value is inferred from missing host telemetry.
-
 ## Repeating The Loop
 
 ```text
@@ -84,7 +80,7 @@ session B -> newer ready revision and one delivery -> session C
 session C -> complete, or repeat
 ```
 
-At every boundary, the new task needs one self-contained capsule and one bounded prompt—not the old transcript, a prior capsule chain, or prompt text duplicated in pointers. The prompt carries goal identity but omits full goal prose; the capsule and live goal inspection remain authoritative. Goal accounting can span multiple clean tasks even though authority and runtime state remain session-scoped.
+At every boundary, the new task needs one self-contained capsule and one bounded prompt—not the old transcript, a prior capsule chain, or prompt text duplicated in pointers. The prompt carries goal identity but omits full goal prose; the capsule and live goal inspection remain authoritative.
 
 ## Stop Conditions
 

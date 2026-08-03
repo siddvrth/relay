@@ -27,7 +27,7 @@ This beginning-of-work seed is ready without optional filler. Add repeatable `--
 
 ## Manual Milestone Revision
 
-Manual checkpoints do not depend on the experimental context ratio:
+Manual checkpoints do not depend on the configured context ratio:
 
 ```bash
 python3 .agents/skills/relay/scripts/context_handoff.py \

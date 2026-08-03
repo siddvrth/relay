@@ -15,7 +15,7 @@ Defaults are independent:
 - transported continuation prompt: at most 1024 UTF-8 bytes
 - automatic threshold policy: `0.30` used context when compatible host telemetry is available, otherwise a bounded `transcript_path` token-count fallback
 
-Byte limits are deterministic hard ceilings. The flags may select smaller limits for testing or stricter local policy, but values above 4096/1024 are rejected before capsule, pointer, or delivery state is written; hooks fail open without injecting a continuation prompt. Byte counts and `(bytes+3)//4` proxies are storage/transport diagnostics; not evidence of token or cost savings.
+Byte limits are deterministic hard ceilings. The flags may select smaller limits, but values above 4096/1024 are rejected before capsule, pointer, or delivery state is written; hooks fail open without injecting a continuation prompt.
 
 ## Boundaries
 
@@ -30,7 +30,7 @@ Byte limits are deterministic hard ceilings. The flags may select smaller limits
 
 ## Trigger Policy
 
-The configurable `0.30` threshold is a conservative safety margin, not a proven optimum for GPT-5.6 or Codex. It is motivated by published Qwen2.5-7B evidence of a 40–50% long-context degradation region. Therefore:
+The configurable `0.30` threshold is a conservative safety margin, not a proven optimum for any host. Therefore:
 
 1. If compatible ratio telemetry is present and is below `0.30`, do not threshold-handoff.
 2. If compatible ratio telemetry is present and reaches `0.30`, refresh the session revision and make it eligible for delivery.
@@ -130,11 +130,9 @@ Runtime state is under:
 
 The repo-latest pointer cannot authorize cross-session resume. Pointers contain metadata only—path/hash, source/transfer/goal/revision/nonce identity, delivery state, and metrics—and never duplicate the capsule or continuation prompt. Before reusing a session pointer, the orchestrator checks identity/readiness, path containment, file type, and SHA-256; any failure forces a new revision.
 
-## Goal Mode
+## Goal Identity
 
-Pass `--goal-objective` with the exact goal text when goal-mode evidence belongs in the capsule. The continuation prompt deliberately omits full goal prose; it carries `goal_identity` and directs the fresh task to inspect live goal state plus the exact capsule. A fresh task recreates or continues the objective only when necessary.
-
-Goal-period `tokensUsed` is narrower than total context, billing usage, cached input, or full transcript consumption. V2 evidence requires at least 20 unique tasks, one per pair; four distinct safe repo-relative preregistration artifacts and hashes; offset-aware run starts after the freeze and within the validator's future-skew bound; every candidate outcome passed and ready; quality non-inferiority; positive median savings; and the exact sign-test gate. Release validation resolves real control-to-candidate-to-HEAD ancestry, matches the declared repository to `origin`, verifies a framed digest of the frozen shipped runtime contract at both commits and the current tree, and verifies each preregistration artifact as the same tracked regular blob at candidate, HEAD, and current. Evidence may live in a later evidence-only commit when runtime has not drifted. Until every gate passes, preserve the exact `.codex-plugin/release-policy.json` `experimental_non_claim` contract.
+Pass `--goal-objective` with the exact goal text when the capsule belongs to a persistent goal. The continuation prompt carries `goal_identity` but omits the full goal prose; the fresh task inspects live goal state before continuing or recreating the objective.
 
 ## Script Surface
 
@@ -147,7 +145,6 @@ Goal-period `tokensUsed` is narrower than total context, billing usage, cached i
 | `scripts/codex_app_jsonrpc.py` | Correlate JSON-RPC messages, decline unserviceable approvals, and enforce deadlines |
 | `scripts/codex_app_delivery_state.py` | Validate launch inputs and atomically persist authoritative delivery state |
 | `scripts/transfer_control.py` | Canonical durable transfer journal, acknowledgement, ownership guard, and stop-result authority |
-| `scripts/goal_telemetry_report.py` | Analyze preregistered paired goal-token evidence |
 | `scripts/test_write_handoff.py` | Standard-library contract and lifecycle tests |
 
 Important flags include `--session-id`, `--revision`, `--capsule-budget-bytes`, `--prompt-budget-bytes`, all critical-kernel fields, `--force-handoff`, `--update-active-task-only`, and `--emit-json`. See `reference.md` for the complete contract and `examples.md` for ready and intentionally non-ready examples.
