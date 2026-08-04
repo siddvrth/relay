@@ -9,7 +9,16 @@ import gzip
 import io
 from pathlib import Path
 import tarfile
-from typing import assert_never
+from typing import NoReturn, TypeVar
+
+try:
+    from typing import assert_never
+except ImportError:
+    _UnreachableValue = TypeVar("_UnreachableValue")
+
+    def assert_never(value: _UnreachableValue) -> NoReturn:
+        """Raise when a supposedly exhaustive match receives an unknown value."""
+        raise AssertionError(f"Unhandled match value: {value!r}")
 
 from test_build_release import artifacts, build, write_fixture
 
