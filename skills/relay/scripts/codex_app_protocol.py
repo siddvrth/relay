@@ -14,7 +14,7 @@ from codex_app_jsonrpc import AppServerClient, AppServerFailure, JsonObject
 CLIENT_INFO: Final[JsonObject] = {
     "name": "relay",
     "title": "Relay",
-    "version": "0.3.0",
+    "version": "0.3.1",
 }
 
 

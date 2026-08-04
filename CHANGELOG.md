@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 - 2026-08-03
+
+- Refreshed the published plugin and Codex App client identity after the context-trigger delivery and distribution cleanup work.
+- Prevented existing cached `0.3.0` installations from being mistaken for the current transport implementation.
+
 ## 0.3.0 - 2026-07-25
 
 - First public Relay release for Codex App and Codex CLI/OMX.

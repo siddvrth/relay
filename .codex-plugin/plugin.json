@@ -1,6 +1,6 @@
 {
   "name": "relay",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Create bounded, acknowledgement-gated handoffs for session-safe continuation of long-running Codex work.",
   "author": {
     "name": "siddvrth",
