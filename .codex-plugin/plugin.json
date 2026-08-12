@@ -1,7 +1,7 @@
 {
   "name": "relay",
-  "version": "0.3.1",
-  "description": "Create bounded, acknowledgement-gated handoffs for session-safe continuation of long-running Codex work.",
+  "version": "0.4.0",
+  "description": "Automatically continue long-running Codex Goals in fresh threads at 30% context usage.",
   "author": {
     "name": "siddvrth",
     "url": "https://github.com/siddvrth/relay"
@@ -12,16 +12,16 @@
   "keywords": [
     "codex",
     "continuity",
-    "checkpoint",
-    "handoff",
+    "goal",
+    "fresh-thread",
     "context",
     "relay"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Relay",
-    "shortDescription": "Bounded clean-task handoffs for Codex",
-    "longDescription": "Write a bounded session-scoped capsule, verify exact transfer identity in a clean Codex task, and acknowledge before single-writer ownership transfers without inheriting the old conversation.",
+    "shortDescription": "Automatic fresh-thread Goal continuity",
+    "longDescription": "At the default 30% context threshold, Relay reads the current Codex Goal, starts a genuinely fresh app-server thread in the same repository, restores the Goal objective, and continues with a compact live-repo handoff.",
     "developerName": "siddvrth",
     "websiteURL": "https://github.com/siddvrth/relay",
     "category": "Productivity",
@@ -30,9 +30,8 @@
       "Automation"
     ],
     "defaultPrompt": [
-      "Checkpoint this task with a self-contained session revision and report readiness.",
-      "Resume from the exact delivered path, SHA-256, source, transfer, goal, revision, and nonce; acknowledge before implementation.",
-      "Preserve this persistent Codex goal across clean contexts and repeat Relay as needed until it is done."
+      "Keep Relay enabled while this Goal runs; it automatically starts a fresh thread when context reaches 30%.",
+      "In a destination thread, inspect live repository state and continue the same Goal objective without relying on the predecessor transcript."
     ]
   }
 }

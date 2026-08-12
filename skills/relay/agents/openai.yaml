@@ -1,4 +1,4 @@
 interface:
   display_name: "Relay"
-  short_description: "Bounded, session-safe Codex handoffs"
-  default_prompt: "Use $relay to write or refresh a bounded handoff capsule. Verify the exact delivered path, SHA-256, source, transfer, goal, revision, and nonce; acknowledge before ownership transfer, then wait for can_continue:true before implementation."
+  short_description: "Automatic fresh-thread Goal continuity"
+  default_prompt: "Relay automatically starts a fresh Codex thread at 30% context usage, restores the current Goal objective, and continues from live repository state."

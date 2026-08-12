@@ -1,165 +1,82 @@
 ---
 name: relay
-description: Preserve quality across long Codex sessions with bounded, self-contained continuation capsules and clean-task prompts. Use after major milestones, before compaction or pauses, in goal mode, or when a new session must resume without the old transcript.
+description: Keep long-running Codex Goals moving by starting a fresh app-server thread at 30% context usage and continuing from a compact live-repository handoff.
 ---
 
 # Relay
 
-## Purpose
+Relay is a Codex-only plugin for long-running Goal Mode work. Its bundled hooks
+check context before prompts and tools. The default threshold is `0.30` and can
+be changed for tests or advanced local use with `RELAY_THRESHOLD`.
 
-Create a session-scoped Relay capsule that a clean Codex task can resume without a transcript or predecessor checkpoint. Each revision contains one self-contained kernel; earlier revisions may help compare changes but are never required for recovery.
+## Automatic flow
 
-Defaults are independent:
+When current occupancy reaches the threshold, Relay:
 
-- capsule: at most 4096 UTF-8 bytes
-- transported continuation prompt: at most 1024 UTF-8 bytes
-- automatic threshold policy: `0.30` used context when compatible host telemetry is available, otherwise a bounded `transcript_path` token-count fallback
+1. Reads the source Goal with `thread/goal/get` when the app-server exposes it.
+2. Builds a short continuation from the Goal objective, current request, live
+   changed-file hint, repository path, and next action.
+3. Starts `codex app-server --stdio`, calls `thread/start` with the same
+   repository `cwd`, restores the objective with `thread/goal/set`, and calls
+   `turn/start`.
+4. Returns the destination thread and turn IDs only after the fresh destination
+   exists. The source prompt is blocked and source tool calls are denied after
+   that point, so the source becomes quiescent through the supported hook API.
 
-Byte limits are deterministic hard ceilings. The flags may select smaller limits, but values above 4096/1024 are rejected before capsule, pointer, or delivery state is written; hooks fail open without injecting a continuation prompt.
+The production path never calls `thread/fork`. A fork retains completed history;
+Relay needs a genuinely fresh context. The destination receives the same plugin
+hooks when the plugin is installed and trusted by Codex.
 
-## Boundaries
+## Continuation state
 
-| Expectation | Contract |
-| --- | --- |
-| Transfer hidden model state | Not supported. The capsule preserves explicit durable facts only. |
-| Resume from a delta chain | Not supported. Every ready revision resumes independently. |
-| Always create a new task | Only when Codex App exposes thread tools; otherwise emit the exact capsule pointer and prompt. |
-| Transfer goal identity | Preserve the derived goal identity and objective text, then inspect live goal state before continuing or recreating it. |
-| Close or archive the source | Acknowledgement authorizes source stop work; quiescence and visible archive/closure are separate observed outcomes. |
-| Support other editor hosts | Not supported. Relay is Codex-only. |
-
-## Trigger Policy
-
-The configurable `0.30` threshold is a conservative safety margin, not a proven optimum for any host. Therefore:
-
-1. If compatible ratio telemetry is present and is below `0.30`, do not threshold-handoff.
-2. If compatible ratio telemetry is present and reaches `0.30`, refresh the session revision and make it eligible for delivery.
-3. If compatible telemetry is absent, `PreToolUse` reads only the final 256 KiB of `transcript_path` and uses the latest `last_token_usage.input_tokens / model_context_window`.
-4. If the transcript is missing, malformed, partial, or schema-changed, fail open.
-5. On every `PreCompact`, advance the session revision even when durable state is unchanged, but do not claim that this fallback launches a task.
-6. A manual or explicitly forced checkpoint can run at any time.
-
-## Required Resume Kernel
-
-A ready capsule is edge-structured so critical facts occur at both attention boundaries:
-
-- opening identity kernel: objective, phase/status, next unfinished action, completion/stop condition, and critical constraints
-- compact supporting middle: required remaining work and authoritative files plus any known completed work, decisions, blockers, and historical `validation_evidence`
-- closing execution/ownership block: `next_action`, exact `resume_validation.command` and `.expected`, source/transfer/goal/revision/nonce identity, authoritative transport-SHA comparison, and the acknowledgement ownership rule
-
-It must include all of these fields with concrete values:
-
-- `session_id` and monotonically increasing `revision`
-- objective, active task, phase, and status
-- completion criteria
-- remaining work and constraints/non-goals
-- authoritative files or symbols
-- one exact `next_action`
-- exact `resume_validation.command` and `resume_validation.expected`
-
-`completed_work`, `decisions`, `blockers`, and `validation_evidence` are optional known-state arrays. They persist as empty arrays when absent, and the capsule records their absence in one compact line instead of requiring filler prose. `--validation-status` is a deprecated input alias for repeatable `--validation-evidence`; `--next-step` is a legacy input alias for canonical `--next-action`. Neither alias is written to new state.
-
-The low-level structural writer rejects missing fields, forbidden placeholders, circular next actions, cross-session identity, revisions that are not exact positive integers, and completed/remaining overlap.
-The orchestrator owns authoritative stale/current/new monotonicity against durable revision state while holding the per-session `.handoff.lock`. Neither layer claims to detect semantic contradictions or generic prose.
-
-If the critical kernel cannot fit, the capsule records `resume_ready:false` and a content-addressed overflow path/hash. Never switch sessions from a non-ready capsule. Optional verbose evidence normally moves to overflow without invalidating a complete kernel; if the overflow reference itself cannot fit beside that kernel, emit compact non-ready metadata with `critical:overflow_reference_budget_exceeded`.
-
-Capsule readiness and transport readiness are independent. The mandatory prompt carries the exact path, session, revision, and capsule SHA-256. If those lines exceed `prompt_budget_bytes`, keep the capsule's `resume_ready:true` result, set `prompt_guard.fits:false`, and block delivery.
-
-## Standard Workflow
-
-1. Seed complete task state for the current session:
-
-   ```bash
-   python3 .agents/skills/relay/scripts/write_handoff.py \
-     --update-active-task-only \
-     --session-id "$CODEX_SESSION_ID" \
-     --revision 1 \
-     --objective "Finish the scoped implementation" \
-     --active-task "Implement and verify the approved change" \
-     --phase "implementation" \
-     --status "Runtime complete; validation pending" \
-     --completion-criteria "Targeted and full validation pass" \
-     --remaining-work "Run validation and resolve failures" \
-     --constraints "Do not add dependencies" \
-     --authoritative-files "src/example.py" \
-     --resume-validation-command "python3 tests/test_example.py" \
-     --resume-validation-expected "exit 0 and all selected tests pass" \
-     --next-action "Run the targeted test and fix the first failure"
-   ```
-
-2. Refresh through `context_handoff.py` or a configured hook. `PreToolUse` is the proactive in-turn trigger; every `PreCompact` advances the revision as a last-resort checkpoint, while the recent-delivery cooldown suppresses duplicate transport.
-3. Continue only when the result has `resume_ready:true`, `prompt_guard.fits:true`, and an emitted prompt containing the exact capsule path, SHA-256, session, and revision.
-4. For an automatic Codex App delivery, the host-side launcher records `launch_requested`, starts `codex app-server --stdio` with the user's normal environment, performs `initialize` then `initialized`, calls `thread/start` with the source repository's exact `cwd`, and calls `turn/start` with the bounded continuation prompt unchanged. It atomically binds the returned thread and turn IDs, then stays alive through `turn/completed`.
-5. The destination verifies the exact transfer ID, source, goal identity, revision, capsule SHA-256, nonce, live repo/goal state, `next_action`, and both exact `resume_validation` fields, then explicitly acknowledges.
-6. Exact acknowledgement atomically revokes source write authority and makes the destination owner. The destination remains control-only until status reports either observed source quiescence or durable read-only `termination_pending` and `can_continue:true`.
-7. Only after acknowledgement request an actually supported stop capability. Visible archive/closure is separate evidence and never proves quiescence.
-
-Do not use `thread/fork` for the production handoff path: a fork inherits completed conversation history and does not shed that context. Relay does not depend on the source model invoking thread-management tools.
-
-## Fresh-Session Resume Protocol
-
-The mandatory transported prompt identifies one capsule by exact path, session, revision, and SHA-256. In the fresh session:
-
-1. Read `AGENTS.md` and other applicable project instructions.
-2. Read the prompt-specified capsule, not whichever file appears newest.
-3. Verify its SHA-256 against the exact transport/pointer and confirm `resume_ready:true`, the expected source, transfer ID, goal identity, revision, and nonce. The capsule cannot embed its own final digest; its closing block requires comparison to the authoritative transported SHA-256.
-4. Inspect `git status --short`, current diffs, and each authoritative file or symbol.
-5. Treat live repository and goal state as authoritative.
-6. Continue the recorded goal objective only when needed; never replace an unrelated active goal.
-7. Run `transfer_control.py status --source-session-id <expected-session>` first to obtain the bound destination session/task IDs. Run the recorded `resume_validation.command`, confirm its exact expected observable, and use `transfer_control.py verify` with the bound IDs, `next_action`, and `resume_validation` values.
-8. Acknowledge exactly once, request/record supported source stop behavior, and wait for `can_continue:true` before substantial implementation.
-9. Execute the capsule's exact next action, then refresh the session revision.
-
-## State And Delivery Model
-
-Runtime state is under:
+Each source thread gets one small atomic record under:
 
 ```text
-.omx/state/relay/
-|-- .latest.json                         # metadata-only convenience pointer
-`-- sessions/<session-hash>/
-    |-- .active-task.json
-    |-- .revision.json
-    |-- .delivery.json
-    |-- .handoff.lock
-    |-- .pointer.json                    # authoritative session pointer
-    |-- <timestamp>-r<revision>-handoff.md
-    `-- overflow/<sha256>.json
+.omx/state/relay/<source-id-hash>.json
 ```
 
-The repo-latest pointer cannot authorize cross-session resume. Pointers contain metadata only—path/hash, source/transfer/goal/revision/nonce identity, delivery state, and metrics—and never duplicate the capsule or continuation prompt. Before reusing a session pointer, the orchestrator checks identity/readiness, path containment, file type, and SHA-256; any failure forces a new revision.
+It contains the source and destination IDs, repository path, Goal objective,
+threshold observation, changed-file hint, and next action. A sibling lock file
+serializes duplicate hooks. There is no transcript copy, revision chain,
+distributed journal, manual seed, or persistent handoff document. Failed
+launches remain fail-open and can retry on the next eligible event.
 
-## Goal Identity
+## Telemetry
 
-Pass `--goal-objective` with the exact goal text when the capsule belongs to a persistent goal. The continuation prompt carries `goal_identity` but omits the full goal prose; the fresh task inspects live goal state before continuing or recreating the objective.
+The preferred signal is the current app-server
+`thread/tokenUsage/updated` notification: `tokenUsage.last.totalTokens` divided
+by `modelContextWindow`, adjusted for the current TUI's 12,000-token baseline.
+For hooks that only provide `transcript_path`, Relay reads the latest exact
+`event_msg` / `token_count` record and uses
+`last_token_usage.total_tokens`. Missing, malformed, or unfamiliar telemetry
+returns control to Codex without starting a thread.
 
-## Script Surface
+## `/compact` comparison
 
-| Script | Purpose |
-| --- | --- |
-| `scripts/write_handoff.py` | Write a bounded v2 capsule and one bounded prompt |
-| `scripts/context_handoff.py` | Scope revisions, locks, and delivery by session; translate official hook envelopes |
-| `scripts/codex_app_transport.py` | Deduplicate, detach, and supervise the host-side Codex App delivery worker |
-| `scripts/codex_app_protocol.py` | Speak app-server JSONL from initialization through persisted thread verification |
-| `scripts/codex_app_jsonrpc.py` | Correlate JSON-RPC messages, decline unserviceable approvals, and enforce deadlines |
-| `scripts/codex_app_delivery_state.py` | Validate launch inputs and atomically persist authoritative delivery state |
-| `scripts/transfer_control.py` | Canonical durable transfer journal, acknowledgement, ownership guard, and stop-result authority |
-| `scripts/test_write_handoff.py` | Standard-library contract and lifecycle tests |
+`/compact` summarizes earlier turns inside the same thread. Relay pays the
+small cost of a new app-server thread and a compact continuation prompt to
+restore a fresh context window and the Goal objective. Relay preserves live
+repository state rather than shipping a transcript; `/compact` preserves more
+conversation context but remains subject to the same active window. Neither
+mechanism guarantees final correctness: the destination must inspect, implement,
+and validate the live work.
 
-Important flags include `--session-id`, `--revision`, `--capsule-budget-bytes`, `--prompt-budget-bytes`, all critical-kernel fields, `--force-handoff`, `--update-active-task-only`, and `--emit-json`. See `reference.md` for the complete contract and `examples.md` for ready and intentionally non-ready examples.
+## Install and verify
 
-## Validation
+Install Relay from the marketplace that contains this plugin:
 
 ```bash
-python3 skills/relay/scripts/test_write_handoff.py
-python3 skills/relay/scripts/test_transfer_control.py
-python3 skills/relay/scripts/test_transfer_integration.py
-python3 skills/relay/scripts/test_codex_app_transport.py
-python3 skills/relay/scripts/smoke_codex_app_transport.py
-python3 scripts/test_release_readiness.py
-python3 scripts/validate_distribution.py
-bash validate.sh
+codex plugin add relay@<marketplace-name>
 ```
 
-Plugin installation is not proof that hooks will execute. Use `/hooks` in Codex CLI or the Codex App plugin-hook trust prompt to confirm the bundled definitions are loaded, reviewed, and trusted once.
+Then review and trust the bundled hooks in `/hooks`. A quick local check is:
+
+```bash
+python3 skills/relay/scripts/test_context_usage.py
+python3 skills/relay/scripts/test_relay.py
+```
+
+For a real local app-server smoke, run
+`python3 skills/relay/scripts/smoke_codex_app_transport.py` in an authenticated
+Codex environment. The smoke reports the destination IDs, same `cwd`, and
+restored Goal objective.

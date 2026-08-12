@@ -14,37 +14,22 @@ Relay is small on purpose. Contributions should preserve that shape.
 
 ```bash
 bash validate.sh
-bash audit_install.sh .
-bash completion_gate.sh .
 rg -n -i 'private-project-name|/Users/.+/Desktop|secret|token|api[_-]?key' .
-```
-
-When changing installed surfaces, edit the portable source first, then run:
-
-```bash
-bash install.sh .
-bash audit_install.sh .
-bash validate.sh
-bash completion_gate.sh .
 ```
 
 ## Documentation Rules
 
 - README is the front door.
-- `docs/` contains user-facing manuals.
-- `skills/relay/` contains the runtime skill protocol, references, and scripts.
-- `artifacts/` contains the sanitized sample only.
+- `skills/relay/SKILL.md` contains the concise runtime contract.
+- Focused tests live beside the standard-library runtime scripts.
 - `.github/` contains contribution intake and validation wiring.
 
-Do not commit raw handoff capsules from unrelated projects.
+Do not commit raw transcripts, continuation state, or private paths from unrelated projects.
 
 ## Review Checklist
 
-- Does the change preserve 30% threshold behavior?
-- Does `preCompact` still force a checkpoint?
-- Does goal-mode text remain preserved without promising goal object transfer?
-- Does one session deduplicate without suppressing the next session's handoff?
-- Do threshold, manual, and `preCompact` paths emit no more than one follow-up?
-- Are installed surfaces updated when portable source changes?
-- Are docs and examples aligned with the new behavior?
-- Are all artifacts sanitized?
+- Does the change preserve below/equal/above 30% behavior?
+- Does a successful destination use `thread/start`, restore the Goal, and avoid `thread/fork`?
+- Does one source thread deduplicate while A-to-B-to-C remains repeatable?
+- Do malformed or unavailable telemetry and failed launches fail open?
+- Does `bash validate.sh` exercise the clean plugin install path?

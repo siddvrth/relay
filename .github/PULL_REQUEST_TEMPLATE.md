@@ -4,23 +4,20 @@
 
 # Runtime Surface
 
-- [ ] Skill protocol or Python scripts changed
-- [ ] Codex App handoff contract changed
-- [ ] Codex CLI/OMX hook changed
+- [ ] Plugin runtime or hook changed
+- [ ] Goal/app-server contract changed
+- [ ] Telemetry behavior changed
 - [ ] Docs only
-- [ ] Sanitized artifacts changed
 
 # Validation
 
 - [ ] `bash validate.sh`
-- [ ] `bash audit_install.sh .`
-- [ ] `bash completion_gate.sh .`
-- [ ] Sanitization scan completed
+- [ ] Clean plugin install checked
+- [ ] Real local app-server smoke checked where available
 
 # Checklist
 
-- [ ] 30% handoff threshold behavior is preserved
-- [ ] `preCompact` still forces a checkpoint
-- [ ] Goal-mode objective text is preserved without promising object transfer
-- [ ] Installed self-test surfaces match portable source when relevant
-- [ ] No raw capsules, transcripts, secrets, private paths, or unrelated project names are committed
+- [ ] Below/equal/above 30% behavior is covered
+- [ ] Destination is fresh and uses `thread/start`, not `thread/fork`
+- [ ] Goal objective is restored when source Goal API is available
+- [ ] No raw transcripts, secrets, private paths, or unrelated project names are committed

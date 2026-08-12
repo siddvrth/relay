@@ -1,9 +1,18 @@
+"""Read the context usage signals emitted by current Codex builds.
+
+The app-server notification is the preferred source.  Hook payloads normally
+only expose ``transcript_path``, so the exact current ``event_msg`` token-count
+record is the compatibility fallback.  Unknown shapes return ``None`` and
+the caller fails open.
+"""
+
 from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Final, Mapping, TypeAlias
+from typing import Final, TypeAlias
 
 
 JsonValue: TypeAlias = (
@@ -15,106 +24,67 @@ JsonValue: TypeAlias = (
     | list["JsonValue"]
     | dict[str, "JsonValue"]
 )
+
 TAIL_BYTES: Final = 256 * 1024
-PERCENT_FIELD_NAMES: Final = (
-    "context_usage_percent",
-    "contextUsagePercent",
-    "context_used_percent",
-    "contextUsedPercent",
-    "tokenUsagePercent",
-    "token_usage_percent",
-    "usagePercent",
-    "usage_percent",
-)
-RATIO_FIELD_NAMES: Final = (
-    "contextUsed",
-    "context_used",
-    "contextUsage",
-    "context_usage",
-    "contextUsedRatio",
-    "context_used_ratio",
-    "usageRatio",
-    "usage_ratio",
-)
+# The Codex TUI reserves this baseline before displaying context percentage.
+BASELINE_TOKENS: Final = 12_000
 
 
-def _finite_ratio(value: float) -> float | None:
-    if not math.isfinite(value) or not 0 <= value <= 1:
+def _ratio(tokens: object, window: object) -> float | None:
+    if (
+        isinstance(tokens, bool)
+        or not isinstance(tokens, (int, float))
+        or isinstance(window, bool)
+        or not isinstance(window, (int, float))
+        or not math.isfinite(float(tokens))
+        or not math.isfinite(float(window))
+        or float(tokens) < 0
+        or float(window) <= BASELINE_TOKENS
+    ):
         return None
-    return value
+    effective_window = float(window) - BASELINE_TOKENS
+    used = max(0.0, float(tokens) - BASELINE_TOKENS)
+    return max(0.0, min(1.0, used / effective_window))
 
 
 def parse_ratio(value: JsonValue) -> float | None:
-    if value is None or isinstance(value, bool | dict | list):
+    """Parse an explicit test/diagnostic ratio without accepting field aliases."""
+
+    if value is None or isinstance(value, (bool, dict, list)):
         return None
     try:
-        text = str(value).strip().lower()
-        if not text or text in {"unknown", "n/a", "na"}:
-            return None
+        text = str(value).strip()
         if text.endswith("%"):
-            parsed = float(text[:-1].strip()) / 100
+            parsed = float(text[:-1].strip()) / 100.0
         else:
             parsed = float(text)
-            parsed = parsed / 100 if parsed > 1 else parsed
     except (TypeError, ValueError, OverflowError):
         return None
-    return _finite_ratio(parsed)
-
-
-def parse_percent(value: JsonValue) -> float | None:
-    if value is None or isinstance(value, bool | dict | list):
+    if not math.isfinite(parsed):
         return None
-    try:
-        text = str(value).strip().lower()
-        if text.endswith("%"):
-            text = text[:-1].strip()
-        parsed = float(text) / 100
-    except (TypeError, ValueError, OverflowError):
+    if parsed > 1:
+        parsed /= 100.0
+    return parsed if 0 <= parsed <= 1 else None
+
+
+def _app_server_notification(payload: Mapping[str, JsonValue]) -> float | None:
+    if payload.get("method") != "thread/tokenUsage/updated":
         return None
-    return _finite_ratio(parsed)
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        return None
+    usage = params.get("tokenUsage")
+    if not isinstance(usage, dict):
+        return None
+    latest = usage.get("last")
+    if not isinstance(latest, dict):
+        return None
+    return _ratio(latest.get("totalTokens"), usage.get("modelContextWindow"))
 
 
-def _compatible_context_used(payload: Mapping[str, JsonValue]) -> float | None:
-    for key in PERCENT_FIELD_NAMES:
-        if key in payload:
-            ratio = parse_percent(payload[key])
-            if ratio is not None:
-                return ratio
-
-    for key in RATIO_FIELD_NAMES:
-        if key in payload:
-            ratio = parse_ratio(payload[key])
-            if ratio is not None:
-                return ratio
-
-    tokens = payload.get("context_tokens")
-    window = payload.get("context_window_size")
-    if tokens is not None and window is not None:
-        try:
-            tokens_value = float(tokens)
-            window_value = float(window)
-        except (TypeError, ValueError, OverflowError):
-            return None
-        if (
-            math.isfinite(tokens_value)
-            and math.isfinite(window_value)
-            and tokens_value >= 0
-            and window_value > 0
-        ):
-            ratio = _finite_ratio(tokens_value / window_value)
-            if ratio is not None:
-                return ratio
-
-    for container_key in ("context", "telemetry", "usage", "metrics"):
-        container = payload.get(container_key)
-        if isinstance(container, dict):
-            ratio = _compatible_context_used(container)
-            if ratio is not None:
-                return ratio
-    return None
-
-
-def _token_count_ratio(record: Mapping[str, JsonValue]) -> float | None:
+def _transcript_record(record: Mapping[str, JsonValue]) -> float | None:
+    if record.get("type") != "event_msg":
+        return None
     payload = record.get("payload")
     if not isinstance(payload, dict) or payload.get("type") != "token_count":
         return None
@@ -124,21 +94,11 @@ def _token_count_ratio(record: Mapping[str, JsonValue]) -> float | None:
     latest = info.get("last_token_usage")
     if not isinstance(latest, dict):
         return None
-    input_tokens = latest.get("input_tokens")
-    model_window = info.get("model_context_window")
-    if (
-        isinstance(input_tokens, bool)
-        or not isinstance(input_tokens, int | float)
-        or isinstance(model_window, bool)
-        or not isinstance(model_window, int | float)
-        or input_tokens < 0
-        or model_window <= 0
-    ):
-        return None
-    return _finite_ratio(float(input_tokens) / float(model_window))
+    # Current Codex uses latest total_tokens for the active context size.
+    return _ratio(latest.get("total_tokens"), info.get("model_context_window"))
 
 
-def _transcript_context_used(path_value: JsonValue) -> float | None:
+def _transcript_context_used(path_value: object) -> float | None:
     if not isinstance(path_value, str) or not path_value.strip():
         return None
     path = Path(path_value).expanduser()
@@ -150,6 +110,7 @@ def _transcript_context_used(path_value: JsonValue) -> float | None:
             tail = handle.read(TAIL_BYTES)
     except OSError:
         return None
+
     if start:
         separator = tail.find(b"\n")
         if separator < 0:
@@ -160,20 +121,26 @@ def _transcript_context_used(path_value: JsonValue) -> float | None:
         lines.pop()
     for encoded in reversed(lines):
         try:
-            decoded: JsonValue = json.loads(encoded)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return None
-        if not isinstance(decoded, dict) or decoded.get("type") != "event_msg":
+            decoded = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(decoded, dict):
+            continue
+        if decoded.get("type") != "event_msg":
             continue
         payload = decoded.get("payload")
         if not isinstance(payload, dict) or payload.get("type") != "token_count":
             continue
-        return _token_count_ratio(decoded)
+        # If the newest token-count record has an unknown schema, do not use a
+        # stale older value.  This is the fail-open boundary for Codex changes.
+        return _transcript_record(decoded)
     return None
 
 
 def extract_context_used(payload: Mapping[str, JsonValue]) -> float | None:
-    compatible = _compatible_context_used(payload)
-    if compatible is not None:
-        return compatible
+    """Return current context occupancy as a ratio, or ``None`` if unknown."""
+
+    direct = _app_server_notification(payload)
+    if direct is not None:
+        return direct
     return _transcript_context_used(payload.get("transcript_path"))

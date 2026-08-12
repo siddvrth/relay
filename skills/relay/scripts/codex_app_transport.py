@@ -1,75 +1,63 @@
-#!/usr/bin/env python3
+"""Launch a detached fresh Codex app-server thread and return its IDs."""
+
 from __future__ import annotations
 
-import argparse
+import json
 import os
 import select
 import signal
 import subprocess
 import sys
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
-import codex_app_delivery_state as delivery_state
-import codex_app_protocol
-import codex_app_worker
-import transfer_control
-from codex_app_delivery_state import DeliveryConfig, LaunchResult
+from codex_app_protocol import (
+    GoalSnapshot,
+    ProtocolAcknowledgement,
+    ProtocolConfig,
+    start_protocol,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class LaunchConfig:
+    cwd: Path
+    continuation_prompt: str
+    codex_binary: Path
+    goal: GoalSnapshot | None = None
+    response_timeout: float = 30.0
+    turn_timeout: float = 3600.0
+
+
+@dataclass(frozen=True, slots=True)
+class LaunchResult:
+    acknowledged: bool
+    destination_thread_id: str | None
+    destination_turn_id: str | None
+    error: str | None = None
 
 
 def launch(
-    config: DeliveryConfig,
+    config: LaunchConfig,
     *,
-    detach: bool = True,
     acknowledgement_timeout: float = 30.0,
 ) -> LaunchResult:
-    validated = delivery_state.validate(config)
-    lock_path = validated.state_path.with_suffix(".delivery.lock")
-    with delivery_state.locked(lock_path):
-        try:
-            existing = delivery_state.read(validated.state_path)
-        except codex_app_protocol.AppServerFailure as failure:
-            return _failure_result(failure)
-        if existing is not None and existing.get("delivery_id") == validated.delivery_id:
-            return delivery_state.result(existing, deduplicated=True)
-        if existing is not None and existing.get("status") != "failed":
-            return _failure_result(
-                codex_app_protocol.AppServerFailure(
-                    code="delivery_state_conflict",
-                    detail="another delivery is still authoritative",
-                )
-            )
-        try:
-            requested = transfer_control.launch_requested(
-                validated.repo,
-                source_session_id=validated.source_session_id,
-                transfer_id=validated.transfer_id,
-                transport_key=validated.delivery_id,
-            )
-        except transfer_control.TransferError as failure:
-            return _failure_result(failure)
-        if requested.get("idempotent") is True:
-            return _unknown_launch(
-                validated,
-                "canonical transfer already records this launch but delivery state is missing",
-            )
-        delivery_state.write(validated.state_path, delivery_state.build(validated))
-        if not detach:
-            return codex_app_worker.run(validated, None)
-        return _spawn_worker(
-            validated,
-            acknowledgement_timeout=acknowledgement_timeout,
-        )
+    """Start the worker and wait only until ``thread/start`` and ``turn/start``.
 
+    The worker stays detached and owns the long-running continuation turn.  The
+    hook process therefore returns promptly after the destination is real.
+    """
 
-def _spawn_worker(
-    config: DeliveryConfig,
-    *,
-    acknowledgement_timeout: float,
-) -> LaunchResult:
-    request_path = config.state_path.with_suffix(
-        f".{config.delivery_id}.request.json"
-    )
-    delivery_state.write(request_path, delivery_state.config_json(config))
+    try:
+        _validate(config)
+    except ValueError as error:
+        return LaunchResult(False, None, None, str(error))
+
+    request_dir = config.cwd / ".omx" / "state" / "relay"
+    request_dir.mkdir(parents=True, exist_ok=True)
+    request_path = request_dir / f".request-{uuid.uuid4().hex}.json"
+    request_path.write_text(json.dumps(_config_json(config)), encoding="utf-8")
     read_fd, write_fd = os.pipe()
     try:
         worker = subprocess.Popen(
@@ -89,120 +77,157 @@ def _spawn_worker(
             pass_fds=(write_fd,),
             start_new_session=True,
         )
-    except OSError as failure:
+    except OSError as error:
         os.close(read_fd)
         os.close(write_fd)
-        return _spawn_failure(config, failure)
+        request_path.unlink(missing_ok=True)
+        return LaunchResult(False, None, None, f"worker_start_failed: {error}")
+
     os.close(write_fd)
     ready, _, _ = select.select([read_fd], [], [], acknowledgement_timeout)
     if not ready:
+        _stop_worker(worker)
         os.close(read_fd)
-        _stop_worker_group(worker)
-        return _unknown_launch(
-            config,
-            "launch acknowledgement timed out; worker was stopped",
+        request_path.unlink(missing_ok=True)
+        return LaunchResult(
+            False,
+            None,
+            None,
+            "launch_acknowledgement_timeout",
         )
     with os.fdopen(read_fd, "r", encoding="utf-8") as handle:
         line = handle.readline()
-    state = delivery_state.decode(line) if line else delivery_state.read(config.state_path)
-    if state is None:
-        _stop_worker_group(worker)
-        return _unknown_launch(
-            config,
-            "worker acknowledgement channel closed without a valid result",
-        )
-    if state is not None and state.get("status") == "failed":
-        try:
-            worker.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _stop_worker_group(worker)
-    return delivery_state.result(
-        state or delivery_state.build(config),
-        deduplicated=False,
-    )
 
-
-def _spawn_failure(config: DeliveryConfig, failure: OSError) -> LaunchResult:
-    state = delivery_state.build(config, status="failed", error=str(failure))
-    delivery_state.write(config.state_path, state)
-    transfer_control.record_launch_outcome(
-        config.repo,
-        source_session_id=config.source_session_id,
-        transfer_id=config.transfer_id,
-        outcome="failed",
-        detail=str(failure),
-    )
-    return delivery_state.result(state, deduplicated=False)
-
-
-def _unknown_launch(config: DeliveryConfig, detail: str) -> LaunchResult:
-    state = delivery_state.build(
-        config,
-        status="failed",
-        acknowledged=False,
-        error=f"launch_outcome_unknown: {detail}",
-    )
-    delivery_state.write(config.state_path, state)
+    if not line:
+        return LaunchResult(False, None, None, "worker_closed_acknowledgement")
     try:
-        transfer_control.record_launch_outcome(
-            config.repo,
-            source_session_id=config.source_session_id,
-            transfer_id=config.transfer_id,
-            outcome="unknown",
-            detail=detail,
-        )
-    except transfer_control.TransferError as journal_failure:
-        state = delivery_state.build(
-            config,
-            status="failed",
-            acknowledged=False,
-            error=(
-                f"launch_outcome_unknown: {detail}; "
-                f"transfer journal update failed: {journal_failure}"
-            ),
-        )
-        delivery_state.write(config.state_path, state)
-    return delivery_state.result(state, deduplicated=False)
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        return LaunchResult(False, None, None, "worker_sent_invalid_acknowledgement")
+    if not isinstance(message, dict):
+        return LaunchResult(False, None, None, "worker_sent_invalid_acknowledgement")
+    if message.get("acknowledged") is not True:
+        return LaunchResult(False, None, None, str(message.get("error") or "launch_failed"))
+    thread_id = message.get("thread_id")
+    turn_id = message.get("turn_id")
+    if not isinstance(thread_id, str) or not isinstance(turn_id, str):
+        return LaunchResult(False, None, None, "worker_acknowledgement_missing_ids")
+    _release_worker_handle(worker)
+    return LaunchResult(True, thread_id, turn_id)
 
 
-def _stop_worker_group(worker: subprocess.Popen[bytes]) -> None:
+def _worker_main(request_path: Path, ack_fd: int) -> int:
+    acknowledged = False
+    with os.fdopen(ack_fd, "w", encoding="utf-8") as acknowledgement:
+        try:
+            payload = json.loads(request_path.read_text(encoding="utf-8"))
+            config = _config_from_json(payload)
+
+            def acknowledge(result: ProtocolAcknowledgement) -> None:
+                nonlocal acknowledged
+                if acknowledged:
+                    return
+                json.dump(
+                    {
+                        "acknowledged": True,
+                        "thread_id": result.thread_id,
+                        "turn_id": result.turn_id,
+                    },
+                    acknowledgement,
+                )
+                acknowledgement.write("\n")
+                acknowledgement.flush()
+                acknowledged = True
+
+            completion = start_protocol(config, on_acknowledged=acknowledge)
+            if not acknowledged:
+                acknowledge(completion.acknowledgement)
+            return 0
+        except Exception as error:  # The source hook fails open on this path.
+            if not acknowledged:
+                json.dump(
+                    {"acknowledged": False, "error": str(error)},
+                    acknowledgement,
+                )
+                acknowledgement.write("\n")
+                acknowledgement.flush()
+            return 1
+        finally:
+            request_path.unlink(missing_ok=True)
+
+
+def _validate(config: LaunchConfig) -> None:
+    if config.cwd.resolve() != config.cwd:
+        raise ValueError("destination cwd must be absolute")
+    if not config.cwd.is_dir():
+        raise ValueError(f"destination cwd does not exist: {config.cwd}")
+    if not config.continuation_prompt.strip():
+        raise ValueError("continuation prompt is empty")
+    if not config.codex_binary.is_file():
+        raise ValueError(f"codex binary not found: {config.codex_binary}")
+    if config.response_timeout <= 0 or config.turn_timeout <= 0:
+        raise ValueError("app-server timeouts must be positive")
+
+
+def _config_json(config: LaunchConfig) -> dict[str, object]:
+    goal = config.goal
+    return {
+        "cwd": str(config.cwd),
+        "continuation_prompt": config.continuation_prompt,
+        "codex_binary": str(config.codex_binary),
+        "goal_objective": goal.objective if goal else None,
+        "goal_token_budget": goal.token_budget if goal else None,
+        "response_timeout": config.response_timeout,
+        "turn_timeout": config.turn_timeout,
+    }
+
+
+def _config_from_json(payload: object) -> ProtocolConfig:
+    if not isinstance(payload, dict):
+        raise ValueError("worker request is not an object")
+    objective = payload.get("goal_objective")
+    token_budget = payload.get("goal_token_budget")
+    return ProtocolConfig(
+        cwd=Path(str(payload["cwd"])),
+        continuation_prompt=str(payload["continuation_prompt"]),
+        codex_binary=Path(str(payload["codex_binary"])),
+        stderr_path=Path(os.devnull),
+        response_timeout=float(payload.get("response_timeout", 30.0)),
+        turn_timeout=float(payload.get("turn_timeout", 3600.0)),
+        goal_objective=objective if isinstance(objective, str) else None,
+        goal_token_budget=(
+            token_budget
+            if isinstance(token_budget, int) and not isinstance(token_budget, bool)
+            else None
+        ),
+    )
+
+
+def _stop_worker(worker: subprocess.Popen[bytes]) -> None:
     if worker.poll() is not None:
         return
-    os.killpg(worker.pid, signal.SIGTERM)
     try:
+        os.killpg(worker.pid, signal.SIGTERM)
         worker.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        os.killpg(worker.pid, signal.SIGKILL)
-        worker.wait(timeout=5)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        if worker.poll() is None:
+            os.killpg(worker.pid, signal.SIGKILL)
+            worker.wait(timeout=5)
 
 
-def _failure_result(failure: Exception) -> LaunchResult:
-    return LaunchResult(
-        acknowledged=False,
-        deduplicated=False,
-        destination_thread_id=None,
-        destination_turn_id=None,
-        status="failed",
-        error=str(failure),
-    )
+def _release_worker_handle(worker: subprocess.Popen[bytes]) -> None:
+    """Let the hook process exit while the detached worker owns the turn."""
+
+    # The worker is deliberately orphaned when this short-lived hook exits;
+    # launchd/systemd reaps it after the fresh turn completes.  Marking the
+    # local Popen handle as detached avoids a false ResourceWarning in Python.
+    worker._child_created = False
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--worker-request")
-    parser.add_argument("--ack-fd", type=int)
-    args = parser.parse_args()
-    if not args.worker_request or args.ack_fd is None:
+    if len(sys.argv) != 5 or sys.argv[1] != "--worker-request" or sys.argv[3] != "--ack-fd":
         return 2
-    request_path = Path(args.worker_request)
-    payload = delivery_state.read(request_path)
-    if payload is None:
-        return 2
-    request_path.unlink(missing_ok=True)
-    config = delivery_state.config_from_json(payload)
-    with os.fdopen(args.ack_fd, "w", encoding="utf-8") as acknowledgement:
-        result = codex_app_worker.run(config, acknowledgement)
-    return 0 if result.acknowledged else 1
+    return _worker_main(Path(sys.argv[2]), int(sys.argv[4]))
 
 
 if __name__ == "__main__":

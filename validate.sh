@@ -2,215 +2,98 @@
 set -euo pipefail
 
 PKG="$(cd "$(dirname "$0")" && pwd)"
-REPO="${1:-$(cd "$PKG/../.." && pwd)}"
 SKILL="$PKG/skills/relay/scripts"
-SMOKE_REPO="${TMPDIR:-/tmp}/relay smoke $$"
 
 echo "=== relay validate ==="
 PYCACHE="${TMPDIR:-/tmp}/relay-pycache-$$"
-trap 'rm -rf "$PYCACHE" "$SMOKE_REPO"' EXIT
+INSTALL_ROOT="${TMPDIR:-/tmp}/relay-marketplace-$$"
+CODEX_HOME_TEST="${TMPDIR:-/tmp}/relay-codex-home-$$"
+SMOKE_REPO="${TMPDIR:-/tmp}/relay-install-smoke-$$"
+trap 'rm -rf "$PYCACHE" "$INSTALL_ROOT" "$CODEX_HOME_TEST" "$SMOKE_REPO"' EXIT
 export PYTHONPYCACHEPREFIX="$PYCACHE"
 
 PYTHONS=()
-PYTHON_COUNT=0
-
-add_python() {
-  candidate="$1"
-  required="$2"
-
+for candidate in python3 python3.10 python3.11; do
   if ! command -v "$candidate" >/dev/null 2>&1; then
-    if [[ "$required" == "required" ]]; then
-      echo "required Python runtime not found: $candidate" >&2
-      exit 1
-    fi
-    return
+    continue
   fi
-
-  probe="$("$candidate" -c '
-import os
-import sys
-
-if sys.version_info < (3, 10):
-    raise SystemExit(2)
-print(os.path.realpath(sys.executable))
-print(".".join(str(part) for part in sys.version_info[:3]))
-' 2>/dev/null)" || {
-    status="$?"
-    if [[ "$required" == "required" ]]; then
-      echo "$candidate must resolve to Python 3.10 or newer (probe exit $status)" >&2
-      exit 1
-    fi
-    echo "skipping $candidate: runtime is not Python 3.10 or newer" >&2
-    return
-  }
-
-  executable="${probe%%$'\n'*}"
-  version="${probe#*$'\n'}"
-  if [[ "$PYTHON_COUNT" -gt 0 ]]; then
-    for existing in "${PYTHONS[@]}"; do
-      if [[ "$existing" == "$executable" ]]; then
-        echo "Python $version: $candidate -> $executable (duplicate, skipped)"
-        return
-      fi
-    done
+  executable="$(command -v "$candidate")"
+  version="$($executable -c 'import sys; print(sys.version_info[:2])')"
+  if [[ "$version" != "(3, 10)" && "$version" != "(3, 11)" && "$version" != "(3, 12)" && "$version" != "(3, 13)" && "$version" != "(3, 14)" ]]; then
+    continue
   fi
-
-  PYTHONS+=("$executable")
-  PYTHON_COUNT=$((PYTHON_COUNT + 1))
-  echo "Python $version: $candidate -> $executable"
-}
-
-add_python python3 required
-add_python python3.10 optional
-add_python python3.11 optional
+  duplicate=false
+  for existing in "${PYTHONS[@]-}"; do
+    [[ "$existing" == "$executable" ]] && duplicate=true
+  done
+  if [[ "$duplicate" == false ]]; then
+    PYTHONS+=("$executable")
+    echo "Python $version: $candidate -> $executable"
+  fi
+done
+[[ "${#PYTHONS[@]}" -gt 0 ]] || { echo "Python 3.10+ is required" >&2; exit 1; }
 
 for python_runtime in "${PYTHONS[@]}"; do
   "$python_runtime" -m py_compile "$SKILL"/*.py "$PKG/scripts"/*.py
 done
 
-test -f "$PKG/.codex-plugin/plugin.json"
-echo "plugin manifest: OK"
-
 python3 "$PKG/scripts/validate_distribution.py"
-python3 "$PKG/scripts/test_release_contract.py"
-python3 "$PKG/scripts/test_build_release.py"
-python3 "$PKG/scripts/test_extract_release.py"
-python3 "$PKG/scripts/test_verify_release.py"
-python3 "$PKG/scripts/test_verify_release_adversarial.py"
-python3 "$PKG/scripts/test_verify_release_identity.py"
-python3 "$PKG/scripts/test_release_readiness.py"
-python3 "$SKILL/test_transfer_control.py" -q
-python3 "$SKILL/test_transfer_integration.py" -q
-python3 "$SKILL/test_transfer_hostile.py" -q
-python3 "$SKILL/test_codex_app_handoff.py" -q
-python3 "$SKILL/test_codex_app_transport.py" -q
-python3 "$SKILL/test_codex_app_transport_safety.py" -q
 python3 "$SKILL/test_context_usage.py" -q
-python3 "$SKILL/test_write_handoff.py"
-if [[ "${RELAY_SKIP_RELEASE_CONSUMER:-0}" != "1" ]]; then
-  python3 "$PKG/scripts/test_release_consumer.py" -q
+python3 "$SKILL/test_relay.py" -q
+bash -n "$PKG/hooks/relay_hook.sh"
+
+if command -v codex >/dev/null 2>&1; then
+  mkdir -p \
+    "$INSTALL_ROOT/.agents/plugins" \
+    "$INSTALL_ROOT/plugins/relay/skills/relay/scripts" \
+    "$INSTALL_ROOT/plugins/relay/skills/relay/agents" \
+    "$CODEX_HOME_TEST"
+  cp -R "$PKG/.codex-plugin" "$PKG/hooks" "$INSTALL_ROOT/plugins/relay/"
+  cp "$PKG/skills/relay/SKILL.md" "$INSTALL_ROOT/plugins/relay/skills/relay/"
+  cp "$PKG/skills/relay/agents/openai.yaml" "$INSTALL_ROOT/plugins/relay/skills/relay/agents/"
+  cp "$PKG/skills/relay/scripts/"*.py "$INSTALL_ROOT/plugins/relay/skills/relay/scripts/"
+  python3 - "$INSTALL_ROOT/.agents/plugins/marketplace.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+Path(sys.argv[1]).write_text(
+    json.dumps(
+        {
+            "name": "relay-local",
+            "plugins": [
+                {
+                    "name": "relay",
+                    "source": {"source": "local", "path": "./plugins/relay"},
+                }
+            ],
+        },
+        indent=2,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+PY
+  CODEX_HOME="$CODEX_HOME_TEST" codex plugin marketplace add "$INSTALL_ROOT" --json >/dev/null
+  installed_json="$(CODEX_HOME="$CODEX_HOME_TEST" codex plugin add relay@relay-local --json)"
+  installed_path="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["installedPath"])' "$installed_json")"
+  installed_list="$(CODEX_HOME="$CODEX_HOME_TEST" codex plugin list --json)"
+  python3 -c 'import json,sys; assert any(item.get("name") == "relay" for item in json.loads(sys.argv[1]).get("installed", []))' "$installed_list"
+  test -f "$installed_path/hooks/hooks.json"
+  test -f "$installed_path/skills/relay/scripts/relay.py"
+  mkdir -p "$SMOKE_REPO"
+  git init -q "$SMOKE_REPO"
+  installed_hook="$(cd "$SMOKE_REPO" && RELAY_CODEX_APP_TRANSPORT=disabled PLUGIN_ROOT="$installed_path" ROOT="$SMOKE_REPO" bash "$installed_path/hooks/relay_hook.sh" PreCompact <<< '{}')"
+  python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == {"continue": True}' "$installed_hook"
+  echo "clean Codex plugin install: OK"
+else
+  echo "clean Codex plugin install: SKIPPED (codex binary not found)"
 fi
 
-# Smoke from a fresh installed repo so validation cannot pass because of a stale host .agents copy.
-mkdir -p "$SMOKE_REPO"
-bash "$PKG/install.sh" "$SMOKE_REPO" >/dev/null
-bash "$PKG/audit_install.sh" "$SMOKE_REPO" >/dev/null
-for python_runtime in "${PYTHONS[@]}"; do
-  "$python_runtime" -m py_compile \
-    "$SMOKE_REPO/.agents/skills/relay/scripts/"*.py
-done
-python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_write_handoff.py" >/dev/null
-python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_transfer_control.py" -q >/dev/null
-python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_transfer_hostile.py" -q >/dev/null
-python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_codex_app_handoff.py" -q >/dev/null
-python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_codex_app_transport.py" -q >/dev/null
-python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_codex_app_transport_safety.py" -q >/dev/null
-python3 "$SMOKE_REPO/.agents/skills/relay/scripts/test_context_usage.py" -q >/dev/null
-echo "fresh-install installed test suite: OK"
-for session_id in a b plugin-a plugin-b; do
-  python3 "$SMOKE_REPO/.agents/skills/relay/scripts/write_handoff.py" \
-    --repo "$SMOKE_REPO" \
-    --session-id "$session_id" \
-    --update-active-task-only \
-    --objective "fresh-install smoke objective" \
-    --active-task "exercise installed hook envelopes" \
-    --phase "validation" \
-    --status "in progress" \
-    --completion-criteria "official hook response is valid" \
-    --remaining-work "inspect smoke response" \
-    --constraints "use the installed standard-library runtime" \
-    --authoritative-files "scripts/workflow/relay_hook.sh" \
-    --resume-validation-command "python3 -V" \
-    --resume-validation-expected "exit 0" \
-    --next-action "inspect the official hook response" >/dev/null
-done
-
-python3 - "$SMOKE_REPO" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-repo = Path(sys.argv[1])
-states = {}
-for path in (repo / ".omx/state/relay/sessions").glob("*/.active-task.json"):
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    states[payload["session_id"]] = payload
-
-assert set(states) == {"a", "b", "plugin-a", "plugin-b"}
-for payload in states.values():
-    assert payload["completed_work"] == []
-    assert payload["decisions"] == []
-    assert payload["blockers"] == []
-    assert payload["validation_evidence"] == []
-    assert payload["next_action"] == "inspect the official hook response"
-    assert "next_step" not in payload
-    assert payload["resume_validation"] == {
-        "command": "python3 -V",
-        "expected": "exit 0",
-    }
-PY
-echo "fresh-install canonical optional-state seed: OK"
-
-threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"a","context_usage_percent":31}' | RELAY_CODEX_APP_TRANSPORT=disabled bash scripts/workflow/relay_hook.sh UserPromptSubmit 2>/dev/null)"
-compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"b","context_usage_percent":1}' | bash scripts/workflow/relay_hook.sh PreCompact 2>/dev/null)"
-capsule_count="$(find "$SMOKE_REPO/.omx/state/relay" -name '*-handoff.md' -type f | wc -l | tr -d '[:space:]')"
-
-plugin_threshold="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-a","context_usage_percent":31}' | RELAY_CODEX_APP_TRANSPORT=disabled PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/relay_hook.sh" UserPromptSubmit 2>/dev/null)"
-plugin_compact="$(cd "$SMOKE_REPO" && printf '{"session_id":"plugin-b","context_usage_percent":1}' | PLUGIN_ROOT="$PKG" ROOT="$SMOKE_REPO" bash "$PKG/hooks/relay_hook.sh" PreCompact 2>/dev/null)"
-
-python3 - "$SMOKE_REPO" "$threshold" "$compact" "$plugin_threshold" "$plugin_compact" "$capsule_count" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-repo = Path(sys.argv[1])
-thresholds = (("a", json.loads(sys.argv[2])), ("plugin-a", json.loads(sys.argv[4])))
-compacts = (json.loads(sys.argv[3]), json.loads(sys.argv[5]))
-official_keys = {
-    "continue",
-    "stopReason",
-    "suppressOutput",
-    "systemMessage",
-    "hookSpecificOutput",
-}
-states = {}
-for path in (repo / ".omx/state/relay/sessions").glob("*/.active-task.json"):
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    states[payload["session_id"]] = payload
-
-for session_id, payload in thresholds:
-    assert set(payload) <= official_keys
-    specific = payload["hookSpecificOutput"]
-    assert specific["hookEventName"] == "UserPromptSubmit"
-    prompt = specific["additionalContext"]
-    pointer = next(
-        candidate
-        for path in (repo / ".omx/state/relay/sessions").glob("*/.pointer.json")
-        if (candidate := json.loads(path.read_text(encoding="utf-8")))["session_id"] == session_id
-    )
-    state = states[session_id]
-    dynamic_values = (
-        pointer["capsule_path"],
-        pointer["session_id"],
-        pointer["revision"],
-        pointer["capsule_sha256"],
-        pointer["goal_identity"],
-        pointer["transfer_nonce"],
-        pointer["transfer_id"],
-        state["next_action"],
-        state["resume_validation"]["command"],
-        state["resume_validation"]["expected"],
-    )
-    assert all(str(value) in prompt for value in dynamic_values)
-    assert len(prompt.encode("utf-8")) <= pointer["metrics"]["prompt_budget_bytes"] + 256
-
-for payload in compacts:
-    assert set(payload) <= official_keys
-    assert payload["continue"] is True
-    assert "hookSpecificOutput" not in payload
-
-assert sys.argv[6] == "2"
-PY
-echo "fresh-install Codex and plugin hook lifecycles: OK"
+if [[ "${RELAY_RUN_REAL_SMOKE:-0}" == "1" ]]; then
+  python3 "$SKILL/smoke_codex_app_transport.py"
+else
+  echo "real local app-server smoke: SKIPPED (set RELAY_RUN_REAL_SMOKE=1)"
+fi
 
 echo "=== all checks passed ==="
