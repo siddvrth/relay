@@ -54,7 +54,11 @@ FAKE_CODEX = textwrap.dedent(
                 send({"id": request_id, "result": {"goal": {
                     "threadId": params["threadId"],
                     "objective": os.environ.get("FAKE_CODEX_GOAL", "keep working"),
-                    "status": "complete" if turn_started else goal_status,
+                    "status": (
+                        "complete"
+                        if turn_started and os.environ.get("FAKE_CODEX_REQUEST_APPROVAL") != "1"
+                        else goal_status
+                    ),
                     "tokenBudget": 12345,
                 }}})
         elif method == "thread/start":
@@ -294,6 +298,8 @@ class RelayTests(unittest.TestCase):
         )
         turns = [item for item in entries if item.get("method") == "turn/start"]
         self.assertEqual(len(turns), 2)
+        methods = [item.get("method") for item in entries]
+        self.assertLess(methods.index("thread/goal/set"), methods.index("turn/start"))
         self.assertTrue(all("thread/fork" not in item.get("method", "") for item in entries))
         for session in ("A", b):
             state = self.state(session)
@@ -412,8 +418,9 @@ class RelayTests(unittest.TestCase):
             clear=False,
         ):
             response = self.call("approval", ratio=0.31)
-        self.assertEqual(response, {"continue": True})
-        self.assertIn("approval", self.state("approval")["error"])
+            outcome = self.outcome("approval", status="failed")
+        self.assertEqual(response["decision"], "block")
+        self.assertIn("approval", outcome["error"])
         self.assertFalse(any(item.get("id") == 999 for item in self.log_entries()))
 
 

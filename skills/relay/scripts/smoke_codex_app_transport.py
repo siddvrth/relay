@@ -19,12 +19,14 @@ from codex_app_protocol import CLIENT_INFO
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 GOAL = (
-    "Relay smoke: in the first fresh successor, create relay-smoke-B.txt with "
-    "the exact text B_WORK_OK using a real file or shell tool, read it back, and "
-    "mark this Goal complete, then reply RELAY_SMOKE_B_DONE. In a later "
-    "successor, rely on the predecessor progress that already verified the "
-    "marker, use no workspace tools, mark this Goal complete, and reply "
-    "RELAY_SMOKE_C_ACK."
+    "Relay smoke lifecycle. If this turn has no Relay continuation context, "
+    "keep the Goal active and reply RELAY_SMOKE_A_WAIT. In the first fresh "
+    "successor, create relay-smoke-B.txt with the exact text B_WORK_OK using a "
+    "real file or shell tool, read it back, emit RELAY_SMOKE_B_WORK_DONE, and "
+    "do not complete the Goal. Keep the Goal active and repeatedly run harmless "
+    "git status checks until Relay hands off. In the next successor whose "
+    "continuation reports RELAY_SMOKE_B_WORK_DONE, use no workspace tools, mark "
+    "this same Goal complete, and reply RELAY_SMOKE_C_ACK."
 )
 MODEL = "gpt-5.6-luna"
 EFFORT = "low"
@@ -129,51 +131,62 @@ def _run_chain(
             source_settings,
         )
         b = _destination(repo, source)
-        _wait_outcome(repo, source, "completed")
-
-        b_thread = _read_thread(client, b)
-        b_path = _thread_path(client, home, b)
+        b_path = _wait_thread_path(home, b)
         marker = repo / "relay-smoke-B.txt"
-        marker_ok = marker.read_text(encoding="utf-8").strip() == "B_WORK_OK"
-        b_goal = _goal(client, b)
+        marker_ok = _wait_marker(marker) == "B_WORK_OK"
+        _wait_rollout_contains(b_path, "RELAY_SMOKE_B_WORK_DONE")
+        b_goal_before = _wait_goal_status(client, b, "active")
         b_settings = _first_settings_context(b_path)
 
-        client.request(
-            "thread/goal/set",
-            {"threadId": b, "objective": GOAL, "status": "active"},
-        )
         _cross_threshold(b_path, threshold)
-        client.request("thread/resume", {"threadId": b})
-        _trigger_relay(
-            client,
-            repo,
-            b,
-            "Continue the active Relay smoke Goal.",
-            {},
-        )
         c = _destination(repo, b)
+        a_outcome = _wait_outcome(repo, source, "completed")
+        b_goal_after = _wait_goal_status(client, b, "active")
         _wait_outcome(repo, b, "completed")
 
         c_thread = _read_thread(client, c)
         c_path = _thread_path(client, home, c)
         c_goal = _goal(client, c)
         c_settings = _first_settings_context(c_path)
+        thread_ids_before_retry_check = _session_thread_ids(home, repo)
+
+        _trigger_relay(
+            client,
+            repo,
+            source,
+            "Verify that ownership remains with the Relay successor.",
+            {},
+        )
         thread_ids = _session_thread_ids(home, repo)
+        a_state = _wait_state(repo, source)
 
         expected = _settings_fingerprint(_first_settings_context(source_path))
         b_fingerprint = _settings_fingerprint(b_settings)
         c_fingerprint = _settings_fingerprint(c_settings)
-        b_text = json.dumps(b_thread)
+        b_text = b_path.read_text(encoding="utf-8")
         c_text = json.dumps(c_thread)
+        b_stayed_active = (
+            b_goal_before.get("status") == "active"
+            and b_goal_after.get("status") == "active"
+        )
+        a_did_not_retry = bool(
+            a_outcome.get("status") == "completed"
+            and a_state.get("destination_thread_id") == b
+            and thread_ids_before_retry_check == thread_ids == {source, b, c}
+        )
         ok = bool(
             source != b
             and b != c
             and source != c
             and marker_ok
-            and "RELAY_SMOKE_B_DONE" in b_text
+            and "RELAY_SMOKE_B_WORK_DONE" in b_text
             and "RELAY_SMOKE_C_ACK" in c_text
-            and b_goal.get("objective") == GOAL
+            and b_goal_before.get("objective") == GOAL
+            and b_goal_after.get("objective") == GOAL
             and c_goal.get("objective") == GOAL
+            and c_goal.get("status") == "complete"
+            and b_stayed_active
+            and a_did_not_retry
             and expected == b_fingerprint == c_fingerprint
             and thread_ids == {source, b, c}
         )
@@ -183,11 +196,19 @@ def _run_chain(
             "first_destination_thread_id": b,
             "second_destination_thread_id": c,
             "marker_ok": marker_ok,
-            "goal_preserved": b_goal.get("objective") == c_goal.get("objective") == GOAL,
+            "goal_preserved": (
+                b_goal_before.get("objective")
+                == b_goal_after.get("objective")
+                == c_goal.get("objective")
+                == GOAL
+            ),
+            "b_goal_stayed_active": b_stayed_active,
+            "c_goal_completed": c_goal.get("status") == "complete",
+            "a_did_not_retry": a_did_not_retry,
             "settings_preserved": expected == b_fingerprint == c_fingerprint,
             "thread_count": len(thread_ids),
             "no_duplicates": thread_ids == {source, b, c},
-            "b_ack": "RELAY_SMOKE_B_DONE" in b_text,
+            "b_ack": "RELAY_SMOKE_B_WORK_DONE" in b_text,
             "c_ack": "RELAY_SMOKE_C_ACK" in c_text,
             "test_threshold": round(threshold, 6),
         }
@@ -342,14 +363,8 @@ def _first_settings_context(path: Path) -> dict[str, object]:
 
 def _settings_fingerprint(value: dict[str, object]) -> dict[str, object]:
     sandbox = value.get("sandbox_policy")
-    profile = value.get("permission_profile")
-    collaboration = value.get("collaboration_mode")
-    collaboration_settings = (
-        collaboration.get("settings") if isinstance(collaboration, dict) else None
-    )
     return {
         "model": value.get("model"),
-        "effort": value.get("effort"),
         "personality": value.get("personality"),
         "approval_policy": value.get("approval_policy"),
         "approvals_reviewer": value.get("approvals_reviewer"),
@@ -359,25 +374,6 @@ def _settings_fingerprint(value: dict[str, object]) -> dict[str, object]:
         }
         if isinstance(sandbox, dict)
         else None,
-        "permission_profile": {
-            "type": profile.get("type"),
-            "network": profile.get("network"),
-            "file_system_type": (
-                profile.get("file_system", {}).get("type")
-                if isinstance(profile.get("file_system"), dict)
-                else None
-            ),
-        }
-        if isinstance(profile, dict)
-        else None,
-        "collaboration_mode": {
-            "mode": collaboration.get("mode"),
-            "model": collaboration_settings.get("model"),
-            "reasoning_effort": collaboration_settings.get("reasoning_effort"),
-        }
-        if isinstance(collaboration, dict) and isinstance(collaboration_settings, dict)
-        else None,
-        "summary": value.get("summary"),
     }
 
 
@@ -395,6 +391,20 @@ def _goal(client: AppServerClient, thread_id: str) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
+def _wait_goal_status(
+    client: AppServerClient,
+    thread_id: str,
+    status: str,
+) -> dict[str, object]:
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        goal = _goal(client, thread_id)
+        if goal.get("status") == status:
+            return goal
+        time.sleep(0.05)
+    raise RuntimeError(f"timed out waiting for {thread_id} Goal status {status}")
+
+
 def _thread_path(client: AppServerClient, home: Path, thread_id: str) -> Path:
     value = _read_thread(client, thread_id).get("path")
     if isinstance(value, str) and Path(value).is_file():
@@ -403,6 +413,42 @@ def _thread_path(client: AppServerClient, home: Path, thread_id: str) -> Path:
     if len(matches) != 1:
         raise RuntimeError(f"could not find rollout for {thread_id}")
     return matches[0]
+
+
+def _wait_thread_path(home: Path, thread_id: str) -> Path:
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        matches = list((home / "sessions").rglob(f"*{thread_id}.jsonl"))
+        if len(matches) == 1:
+            return matches[0]
+        time.sleep(0.05)
+    raise RuntimeError(f"timed out waiting for rollout {thread_id}")
+
+
+def _wait_marker(path: Path) -> str:
+    deadline = time.monotonic() + 300
+    while time.monotonic() < deadline:
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            time.sleep(0.05)
+            continue
+        if value:
+            return value
+        time.sleep(0.05)
+    raise RuntimeError("timed out waiting for real B workspace action")
+
+
+def _wait_rollout_contains(path: Path, text: str) -> None:
+    deadline = time.monotonic() + 300
+    while time.monotonic() < deadline:
+        try:
+            if text in path.read_text(encoding="utf-8"):
+                return
+        except OSError:
+            pass
+        time.sleep(0.05)
+    raise RuntimeError(f"timed out waiting for {text}")
 
 
 def _session_thread_ids(home: Path, repo: Path) -> set[str]:

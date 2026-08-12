@@ -7,6 +7,7 @@ import select
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 
 JsonScalar = None | bool | int | float | str
@@ -95,8 +96,13 @@ class AppServerClient:
             if self._is_completed_turn(message, turn_id):
                 return
 
-    def wait_for_goal_terminal(self, thread_id: str) -> None:
-        """Wait until Goal Mode reaches a terminal status in the destination."""
+    def wait_for_goal_terminal(
+        self,
+        thread_id: str,
+        *,
+        handoff_state_path: Path | None = None,
+    ) -> None:
+        """Wait until Goal Mode terminates or hands off to another Relay thread."""
 
         deadline = time.monotonic() + self._turn_timeout
         while True:
@@ -116,6 +122,10 @@ class AppServerClient:
                     code="invalid_goal_status",
                     detail=f"destination Goal has unexpected status {status}",
                 )
+            if handoff_state_path is not None and _handoff_acknowledged(
+                handoff_state_path
+            ):
+                return
             if time.monotonic() >= deadline:
                 raise AppServerFailure(
                     code="protocol_timeout",
@@ -253,3 +263,16 @@ class AppServerClient:
                 detail=f"destination turn ended with status {status}",
             )
         return True
+
+
+def _handoff_acknowledged(path: Path) -> bool:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return False
+    return bool(
+        isinstance(value, dict)
+        and value.get("status") == "running"
+        and isinstance(value.get("destination_thread_id"), str)
+        and value["destination_thread_id"]
+    )

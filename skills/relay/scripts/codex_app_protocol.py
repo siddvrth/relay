@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 from collections.abc import Callable
@@ -117,6 +118,21 @@ def start_protocol(
             thread_id = _nested_id(thread, "thread", "thread/start")
             _require_thread_settings(thread, config)
 
+            if config.goal_objective:
+                goal_params: JsonObject = {
+                    "threadId": thread_id,
+                    "objective": config.goal_objective,
+                }
+                if config.goal_token_budget is not None:
+                    goal_params["tokenBudget"] = config.goal_token_budget
+                if config.goal_status is not None:
+                    goal_params["status"] = config.goal_status
+                _require_goal(
+                    client.request("thread/goal/set", goal_params),
+                    config,
+                    expected_status=goal_params.get("status"),
+                )
+
             turn_params: JsonObject = {
                 "threadId": thread_id,
                 "input": [
@@ -139,21 +155,6 @@ def start_protocol(
             turn = client.request("turn/start", turn_params)
             turn_id = _nested_id(turn, "turn", "turn/start")
 
-            if config.goal_objective:
-                goal_params: JsonObject = {
-                    "threadId": thread_id,
-                    "objective": config.goal_objective,
-                }
-                if config.goal_token_budget is not None:
-                    goal_params["tokenBudget"] = config.goal_token_budget
-                if config.goal_status is not None:
-                    goal_params["status"] = config.goal_status
-                _require_goal(
-                    client.request("thread/goal/set", goal_params),
-                    config,
-                    expected_status=goal_params.get("status"),
-                )
-
             acknowledgement = ProtocolAcknowledgement(
                 thread_id=thread_id,
                 turn_id=turn_id,
@@ -162,7 +163,10 @@ def start_protocol(
                 on_acknowledged(acknowledgement)
 
             if config.goal_objective:
-                client.wait_for_goal_terminal(thread_id)
+                client.wait_for_goal_terminal(
+                    thread_id,
+                    handoff_state_path=_relay_state_path(config.cwd, thread_id),
+                )
             else:
                 client.wait_for_completion(turn_id)
             read_result = client.request(
@@ -247,6 +251,11 @@ def _thread_start_params(config: ProtocolConfig) -> JsonObject:
         if value is not None:
             params[key] = value
     return params
+
+
+def _relay_state_path(cwd: Path, thread_id: str) -> Path:
+    digest = hashlib.sha256(thread_id.encode("utf-8")).hexdigest()[:24]
+    return cwd / ".omx" / "state" / "relay" / f"{digest}.json"
 
 
 def _require_thread_settings(result: JsonObject, config: ProtocolConfig) -> None:

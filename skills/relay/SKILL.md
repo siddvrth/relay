@@ -18,9 +18,9 @@ When current occupancy reaches the threshold, Relay:
    progress/decisions/constraints/validation, live changed-file hint,
    repository path, and next action.
 3. Starts `codex app-server --stdio`, calls `thread/start` with the same
-   repository `cwd` and effective execution settings, starts the configured
-   continuation turn, then immediately restores and verifies the Goal with
-   `thread/goal/set` before acknowledging the handoff.
+   repository `cwd` and directly exposed thread settings, restores and verifies
+   the Goal with `thread/goal/set`, then calls `turn/start` before acknowledging
+   the handoff.
 4. Returns the destination thread and turn IDs only after the fresh destination
    exists. The source prompt is blocked and source tool calls are denied after
    that point, so the source becomes quiescent through the supported hook API.
@@ -28,6 +28,12 @@ When current occupancy reaches the threshold, Relay:
 The production path never calls `thread/fork`. A fork retains completed history;
 Relay needs a genuinely fresh context. The destination receives the same plugin
 hooks when the plugin is installed and trusted by Codex.
+
+Relay preserves the hook-visible model, personality, approval reviewer/policy,
+and equivalent sandbox behavior. It requests effort and summary on the explicit
+continuation turn. Hook payloads do not expose provider identity or active
+permission-profile provenance, so Relay makes no preservation claim for those
+fields.
 
 ## Continuation state
 

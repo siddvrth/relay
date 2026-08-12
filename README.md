@@ -5,11 +5,13 @@ default 30% occupancy threshold, its plugin hooks start a genuinely fresh
 Codex app-server thread in the same repository, restore the current Goal
 objective, and continue with a compact live-repository prompt.
 
-Relay preserves the effective model, reasoning effort, personality,
-collaboration mode, approval reviewer/policy, sandbox or permission profile,
-service tier, and summary mode captured at the source hook boundary. It only
-relays an active Goal; unavailable Goal or settings reads fail open for a later
-retry.
+Relay preserves the effective model, personality, approval reviewer/policy,
+and equivalent sandbox behavior exposed at the source hook boundary. It also
+requests the source effort and summary on the explicit
+continuation turn. Provider identity and active permission-profile provenance
+are not exposed by the hook payload, so Relay does not claim to preserve them.
+It only relays an active Goal; unavailable Goal or settings reads fail open for
+a later retry.
 
 The source thread is quiesced through the supported hook responses: its next
 prompt is blocked and its tool calls are denied after the destination is real.
