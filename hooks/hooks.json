@@ -21,28 +21,6 @@
           }
         ]
       }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh PreCompact",
-            "statusMessage": "Writing relay checkpoint"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh Stop",
-            "statusMessage": "Preserving relay state"
-          }
-        ]
-      }
     ]
   }
 }

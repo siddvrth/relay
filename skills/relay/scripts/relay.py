@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import deque
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,6 +28,7 @@ DEFAULT_THRESHOLD = 0.30
 MAX_GOAL_CHARS = 4000  # Codex's current thread/goal/set contract limit.
 MAX_REQUEST_CHARS = 1200
 MAX_FILE_HINT_CHARS = 1200
+MAX_PROGRESS_CHARS = 2400
 
 
 def handle_hook(
@@ -57,7 +59,14 @@ def handle_hook(
         with _locked(lock_path):
             state = _read_state(state_path)
             if state and state.get("status") == "running":
-                return _quiesce(event, state)
+                failure = _destination_failure(state)
+                if failure is None:
+                    return _quiesce(event, state)
+                failed_state = dict(state)
+                failed_state.update(
+                    {"status": "failed", "error": failure, "updated_at": _timestamp()}
+                )
+                _write_state(state_path, failed_state)
 
             ratio = context_used
             if ratio is None:
@@ -72,15 +81,24 @@ def handle_hook(
                 return _allow(event)
 
             goal = _read_goal(repo, session_id, binary)
-            objective, objective_source = _objective(payload, goal)
+            if goal is None or goal.status not in (None, "active"):
+                return _allow(event)
+            handoff = _handoff_context(payload)
+            settings = _execution_settings(handoff.get("turn_context"))
+            if settings is None:
+                return _allow(event)
+            objective = _bounded(goal.objective.strip(), MAX_GOAL_CHARS)
+            objective_source = "thread/goal/get"
             request = _request(payload)
             files = _changed_files(repo)
+            progress = handoff.get("recent_progress")
             continuation = _continuation(
                 repo=repo,
                 source_session_id=session_id,
                 objective=objective,
                 request=request,
                 files=files,
+                progress=progress if isinstance(progress, str) else None,
                 ratio=ratio,
                 threshold=threshold,
             )
@@ -107,6 +125,8 @@ def handle_hook(
                     continuation_prompt=continuation,
                     codex_binary=binary,
                     goal=goal,
+                    settings=settings,
+                    outcome_path=state_path.with_suffix(".outcome.json"),
                     response_timeout=_timeout("RELAY_APP_SERVER_RESPONSE_TIMEOUT", 30.0),
                     turn_timeout=_timeout("RELAY_APP_SERVER_TURN_TIMEOUT", 3600.0),
                 )
@@ -142,6 +162,8 @@ def handle_hook(
                 "relevant_files": files,
                 "context_used": round(ratio, 6),
                 "threshold": threshold,
+                "outcome_path": str(state_path.with_suffix(".outcome.json")),
+                "worker_pid": result.worker_pid,
                 "created_at": state.get("created_at", _timestamp()) if state else _timestamp(),
                 "updated_at": _timestamp(),
             }
@@ -162,18 +184,6 @@ def _read_goal(repo: Path, session_id: str, binary: Path) -> GoalSnapshot | None
         )
     except Exception:
         return None
-
-
-def _objective(
-    payload: Mapping[str, Any],
-    goal: GoalSnapshot | None,
-) -> tuple[str, str]:
-    if goal is not None and goal.objective.strip():
-        return _bounded(goal.objective.strip(), MAX_GOAL_CHARS), "thread/goal/get"
-    prompt = payload.get("prompt")
-    if isinstance(prompt, str) and prompt.strip():
-        return _bounded(prompt.strip(), MAX_GOAL_CHARS), "UserPromptSubmit.prompt"
-    return "Continue the active task in this repository.", "fallback"
 
 
 def _request(payload: Mapping[str, Any]) -> str | None:
@@ -206,6 +216,7 @@ def _continuation(
     objective: str,
     request: str | None,
     files: str,
+    progress: str | None,
     ratio: float,
     threshold: float,
 ) -> str:
@@ -216,6 +227,13 @@ def _continuation(
     ]
     if request and request != objective:
         lines.append(f"Current user request: {request}")
+    if progress:
+        lines.extend(
+            [
+                "Recent predecessor progress (context only; verify against live state):",
+                progress,
+            ]
+        )
     lines.extend(
         [
             f"Repository: {repo}",
@@ -229,12 +247,154 @@ def _continuation(
     return "\n".join(lines)
 
 
+def _handoff_context(payload: Mapping[str, Any]) -> dict[str, Any]:
+    value = payload.get("transcript_path")
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    latest_context: dict[str, Any] | None = None
+    messages: deque[str] = deque(maxlen=3)
+    try:
+        with Path(value).expanduser().open("r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                record_type = record.get("type")
+                item = record.get("payload")
+                if record_type == "turn_context" and isinstance(item, dict):
+                    latest_context = item
+                elif (
+                    record_type == "event_msg"
+                    and isinstance(item, dict)
+                    and item.get("type") == "agent_message"
+                    and isinstance(item.get("message"), str)
+                    and item["message"].strip()
+                ):
+                    messages.append(item["message"].strip())
+    except OSError:
+        return {}
+    result: dict[str, Any] = {}
+    if latest_context is not None:
+        result["turn_context"] = latest_context
+    if messages:
+        result["recent_progress"] = _bounded("\n".join(messages), MAX_PROGRESS_CHARS)
+    return result
+
+
+def _execution_settings(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    model = value.get("model")
+    approval = value.get("approval_policy")
+    sandbox = value.get("sandbox_policy")
+    if (
+        not isinstance(model, str)
+        or not model.strip()
+        or not isinstance(approval, (str, dict))
+        or not isinstance(sandbox, dict)
+    ):
+        return None
+
+    settings: dict[str, object] = {
+        "model": model,
+        "approvalPolicy": approval,
+    }
+    profile = value.get("permission_profile")
+    profile_id = profile.get("id") if isinstance(profile, dict) else None
+    if isinstance(profile_id, str) and profile_id:
+        settings["permissions"] = profile_id
+    else:
+        normalized = _normalize_sandbox(sandbox)
+        if normalized is None:
+            return None
+        settings["sandbox"] = normalized[0]
+        settings["sandboxPolicy"] = normalized[1]
+
+    for source, destination in (
+        ("approvals_reviewer", "approvalsReviewer"),
+        ("collaboration_mode", "collaborationMode"),
+        ("effort", "effort"),
+        ("personality", "personality"),
+        ("service_tier", "serviceTier"),
+        ("summary", "summary"),
+    ):
+        setting = value.get(source)
+        if setting is not None:
+            settings[destination] = setting
+    return settings
+
+
+def _normalize_sandbox(value: Mapping[str, Any]) -> tuple[str, dict[str, object]] | None:
+    source_type = value.get("type")
+    types = {
+        "danger-full-access": ("danger-full-access", "dangerFullAccess"),
+        "read-only": ("read-only", "readOnly"),
+        "workspace-write": ("workspace-write", "workspaceWrite"),
+        "external-sandbox": ("danger-full-access", "externalSandbox"),
+    }
+    mapped = types.get(source_type)
+    if mapped is None:
+        return None
+    key_names = {
+        "exclude_slash_tmp": "excludeSlashTmp",
+        "exclude_tmpdir_env_var": "excludeTmpdirEnvVar",
+        "network_access": "networkAccess",
+        "read_only_access": "readOnlyAccess",
+        "readable_roots": "readableRoots",
+        "writable_roots": "writableRoots",
+        "include_platform_defaults": "includePlatformDefaults",
+    }
+
+    def convert(item: object) -> object:
+        if isinstance(item, dict):
+            return {key_names.get(str(key), str(key)): convert(child) for key, child in item.items()}
+        if isinstance(item, list):
+            return [convert(child) for child in item]
+        return item
+
+    policy = convert(value)
+    if not isinstance(policy, dict):
+        return None
+    policy["type"] = mapped[1]
+    return mapped[0], policy
+
+
+def _destination_failure(state: Mapping[str, Any]) -> str | None:
+    value = state.get("outcome_path")
+    outcome: dict[str, Any] | None = None
+    if isinstance(value, str):
+        outcome = _read_state(Path(value))
+    if outcome is not None:
+        status = outcome.get("status")
+        if status == "failed":
+            return str(outcome.get("error") or "destination worker failed")
+        if status == "completed":
+            return None
+    pid = state.get("worker_pid")
+    if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return "destination worker exited before reporting completion"
+        except PermissionError:
+            pass
+    return None
+
+
 def _quiesce(event: str, state: Mapping[str, Any]) -> dict[str, Any]:
     thread_id = state.get("destination_thread_id")
     suffix = f" Destination thread: {thread_id}." if thread_id else ""
     reason = "Relay started a fresh successor thread; the predecessor is quiesced." + suffix
     if event == "UserPromptSubmit":
-        return {"decision": "block", "reason": reason}
+        return {
+            "continue": False,
+            "stopReason": reason,
+            "decision": "block",
+            "reason": reason,
+        }
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

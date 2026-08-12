@@ -8,6 +8,7 @@ import select
 import signal
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,8 @@ class LaunchConfig:
     continuation_prompt: str
     codex_binary: Path
     goal: GoalSnapshot | None = None
+    settings: dict[str, object] | None = None
+    outcome_path: Path | None = None
     response_timeout: float = 30.0
     turn_timeout: float = 3600.0
 
@@ -35,6 +38,7 @@ class LaunchResult:
     acknowledged: bool
     destination_thread_id: str | None
     destination_turn_id: str | None
+    worker_pid: int | None = None
     error: str | None = None
 
 
@@ -52,7 +56,7 @@ def launch(
     try:
         _validate(config)
     except ValueError as error:
-        return LaunchResult(False, None, None, str(error))
+        return LaunchResult(False, None, None, error=str(error))
 
     request_dir = config.cwd / ".omx" / "state" / "relay"
     request_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +85,7 @@ def launch(
         os.close(read_fd)
         os.close(write_fd)
         request_path.unlink(missing_ok=True)
-        return LaunchResult(False, None, None, f"worker_start_failed: {error}")
+        return LaunchResult(False, None, None, error=f"worker_start_failed: {error}")
 
     os.close(write_fd)
     ready, _, _ = select.select([read_fd], [], [], acknowledgement_timeout)
@@ -93,40 +97,58 @@ def launch(
             False,
             None,
             None,
-            "launch_acknowledgement_timeout",
+            error="launch_acknowledgement_timeout",
         )
     with os.fdopen(read_fd, "r", encoding="utf-8") as handle:
         line = handle.readline()
 
     if not line:
-        return LaunchResult(False, None, None, "worker_closed_acknowledgement")
+        _reap_worker(worker)
+        return LaunchResult(False, None, None, error="worker_closed_acknowledgement")
     try:
         message = json.loads(line)
     except json.JSONDecodeError:
-        return LaunchResult(False, None, None, "worker_sent_invalid_acknowledgement")
+        _reap_worker(worker)
+        return LaunchResult(False, None, None, error="worker_sent_invalid_acknowledgement")
     if not isinstance(message, dict):
-        return LaunchResult(False, None, None, "worker_sent_invalid_acknowledgement")
+        _reap_worker(worker)
+        return LaunchResult(False, None, None, error="worker_sent_invalid_acknowledgement")
     if message.get("acknowledged") is not True:
-        return LaunchResult(False, None, None, str(message.get("error") or "launch_failed"))
+        _reap_worker(worker)
+        return LaunchResult(
+            False,
+            None,
+            None,
+            error=str(message.get("error") or "launch_failed"),
+        )
     thread_id = message.get("thread_id")
     turn_id = message.get("turn_id")
     if not isinstance(thread_id, str) or not isinstance(turn_id, str):
-        return LaunchResult(False, None, None, "worker_acknowledgement_missing_ids")
+        return LaunchResult(False, None, None, error="worker_acknowledgement_missing_ids")
     _release_worker_handle(worker)
-    return LaunchResult(True, thread_id, turn_id)
+    return LaunchResult(True, thread_id, turn_id, worker_pid=worker.pid)
 
 
 def _worker_main(request_path: Path, ack_fd: int) -> int:
     acknowledged = False
+    acknowledgement_result: ProtocolAcknowledgement | None = None
+    outcome_path: Path | None = None
     with os.fdopen(ack_fd, "w", encoding="utf-8") as acknowledgement:
         try:
             payload = json.loads(request_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and isinstance(payload.get("outcome_path"), str):
+                outcome_path = Path(payload["outcome_path"])
+                _write_outcome(
+                    outcome_path,
+                    {"status": "running", "worker_pid": os.getpid()},
+                )
             config = _config_from_json(payload)
 
             def acknowledge(result: ProtocolAcknowledgement) -> None:
-                nonlocal acknowledged
+                nonlocal acknowledged, acknowledgement_result
                 if acknowledged:
                     return
+                acknowledgement_result = result
                 json.dump(
                     {
                         "acknowledged": True,
@@ -142,8 +164,28 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
             completion = start_protocol(config, on_acknowledged=acknowledge)
             if not acknowledged:
                 acknowledge(completion.acknowledgement)
+            if not completion.destination_readable:
+                raise RuntimeError("destination thread was not readable after completion")
+            if outcome_path is not None:
+                _write_outcome(
+                    outcome_path,
+                    {
+                        "status": "completed",
+                        "thread_id": completion.acknowledgement.thread_id,
+                        "turn_id": completion.acknowledgement.turn_id,
+                    },
+                )
             return 0
         except Exception as error:  # The source hook fails open on this path.
+            if outcome_path is not None:
+                failed: dict[str, object] = {
+                    "status": "failed",
+                    "error": str(error),
+                }
+                if acknowledgement_result is not None:
+                    failed["thread_id"] = acknowledgement_result.thread_id
+                    failed["turn_id"] = acknowledgement_result.turn_id
+                _write_outcome(outcome_path, failed)
             if not acknowledged:
                 json.dump(
                     {"acknowledged": False, "error": str(error)},
@@ -167,6 +209,8 @@ def _validate(config: LaunchConfig) -> None:
         raise ValueError(f"codex binary not found: {config.codex_binary}")
     if config.response_timeout <= 0 or config.turn_timeout <= 0:
         raise ValueError("app-server timeouts must be positive")
+    if config.outcome_path is not None and not config.outcome_path.is_absolute():
+        raise ValueError("outcome path must be absolute")
 
 
 def _config_json(config: LaunchConfig) -> dict[str, object]:
@@ -176,7 +220,10 @@ def _config_json(config: LaunchConfig) -> dict[str, object]:
         "continuation_prompt": config.continuation_prompt,
         "codex_binary": str(config.codex_binary),
         "goal_objective": goal.objective if goal else None,
+        "goal_status": goal.status if goal else None,
         "goal_token_budget": goal.token_budget if goal else None,
+        "settings": config.settings,
+        "outcome_path": str(config.outcome_path) if config.outcome_path else None,
         "response_timeout": config.response_timeout,
         "turn_timeout": config.turn_timeout,
     }
@@ -186,7 +233,9 @@ def _config_from_json(payload: object) -> ProtocolConfig:
     if not isinstance(payload, dict):
         raise ValueError("worker request is not an object")
     objective = payload.get("goal_objective")
+    status = payload.get("goal_status")
     token_budget = payload.get("goal_token_budget")
+    settings = payload.get("settings")
     return ProtocolConfig(
         cwd=Path(str(payload["cwd"])),
         continuation_prompt=str(payload["continuation_prompt"]),
@@ -195,12 +244,28 @@ def _config_from_json(payload: object) -> ProtocolConfig:
         response_timeout=float(payload.get("response_timeout", 30.0)),
         turn_timeout=float(payload.get("turn_timeout", 3600.0)),
         goal_objective=objective if isinstance(objective, str) else None,
+        goal_status=status if isinstance(status, str) else None,
         goal_token_budget=(
             token_budget
             if isinstance(token_budget, int) and not isinstance(token_budget, bool)
             else None
         ),
+        settings=settings if isinstance(settings, dict) else None,
     )
+
+
+def _write_outcome(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, separators=(",", ":"), sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def _stop_worker(worker: subprocess.Popen[bytes]) -> None:
@@ -222,6 +287,13 @@ def _release_worker_handle(worker: subprocess.Popen[bytes]) -> None:
     # launchd/systemd reaps it after the fresh turn completes.  Marking the
     # local Popen handle as detached avoids a false ResourceWarning in Python.
     worker._child_created = False
+
+
+def _reap_worker(worker: subprocess.Popen[bytes]) -> None:
+    try:
+        worker.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _stop_worker(worker)
 
 
 def main() -> int:

@@ -16,26 +16,11 @@ case "$EVENT" in
   PreToolUse|pre-tool-use)
     OFFICIAL_EVENT="PreToolUse"
     ;;
-  PreCompact|preCompact|pre-compact|Stop|stop)
-    if [[ "$EVENT" == Stop || "$EVENT" == stop ]]; then
-      OFFICIAL_EVENT="Stop"
-    else
-      OFFICIAL_EVENT="PreCompact"
-    fi
-    ;;
   *)
-    OFFICIAL_EVENT="PreCompact"
+    printf '%s\n' '{"continue":true}'
+    exit 0
     ;;
 esac
-
-if [[ "$OFFICIAL_EVENT" == "PreCompact" || "$OFFICIAL_EVENT" == "Stop" ]]; then
-  if [[ "$OFFICIAL_EVENT" == "Stop" ]]; then
-    printf '%s\n' '{"continue":true}'
-  else
-    printf '%s\n' '{"continue":true}'
-  fi
-  exit 0
-fi
 
 if [[ ! -f "$SCRIPT" ]] || ! command -v python3 >/dev/null 2>&1; then
   if [[ "$OFFICIAL_EVENT" == "PreToolUse" ]]; then

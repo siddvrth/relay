@@ -86,7 +86,9 @@ def validate() -> None:
     hooks = load_object(HOOKS).get("hooks")
     if not isinstance(hooks, dict):
         fail("hooks/hooks.json must contain hooks")
-    for event in ("UserPromptSubmit", "PreToolUse", "PreCompact", "Stop"):
+    if set(hooks) != {"UserPromptSubmit", "PreToolUse"}:
+        fail("plugin must expose only its two functional hooks")
+    for event in ("UserPromptSubmit", "PreToolUse"):
         entries = hooks.get(event)
         if not isinstance(entries, list) or not entries:
             fail(f"missing plugin hook: {event}")

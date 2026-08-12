@@ -1,9 +1,9 @@
 """Read the context usage signals emitted by current Codex builds.
 
-The app-server notification is the preferred source.  Hook payloads normally
-only expose ``transcript_path``, so the exact current ``event_msg`` token-count
-record is the compatibility fallback.  Unknown shapes return ``None`` and
-the caller fails open.
+Installed hooks use ``transcript_path`` and the latest exact ``event_msg``
+token-count record. Direct app-server notifications are also accepted for
+diagnostics and focused tests. Unknown shapes return ``None`` so Relay fails
+open when Codex changes.
 """
 
 from __future__ import annotations

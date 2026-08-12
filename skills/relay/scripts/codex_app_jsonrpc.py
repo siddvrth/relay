@@ -95,6 +95,50 @@ class AppServerClient:
             if self._is_completed_turn(message, turn_id):
                 return
 
+    def wait_for_goal_terminal(self, thread_id: str) -> None:
+        """Wait until Goal Mode reaches a terminal status in the destination."""
+
+        deadline = time.monotonic() + self._turn_timeout
+        while True:
+            result = self.request("thread/goal/get", {"threadId": thread_id})
+            goal = result.get("goal")
+            if not isinstance(goal, dict):
+                raise AppServerFailure(
+                    code="goal_unavailable",
+                    detail="destination Goal disappeared before completion",
+                )
+            self._raise_for_failed_turn()
+            status = goal.get("status")
+            if status in {"complete", "blocked"}:
+                return
+            if status != "active":
+                raise AppServerFailure(
+                    code="invalid_goal_status",
+                    detail=f"destination Goal has unexpected status {status}",
+                )
+            if time.monotonic() >= deadline:
+                raise AppServerFailure(
+                    code="protocol_timeout",
+                    detail="timed out waiting for the destination Goal",
+                )
+            time.sleep(0.25)
+
+    def _raise_for_failed_turn(self) -> None:
+        pending = self._notifications
+        self._notifications = []
+        for message in pending:
+            if message.get("method") != "turn/completed":
+                self._notifications.append(message)
+                continue
+            params = message.get("params")
+            turn = params.get("turn") if isinstance(params, dict) else None
+            status = turn.get("status") if isinstance(turn, dict) else None
+            if status not in {None, "completed"}:
+                raise AppServerFailure(
+                    code="turn_failed",
+                    detail=f"destination turn ended with status {status}",
+                )
+
     def _route(self, message: JsonObject) -> bool:
         method = message.get("method")
         if isinstance(method, str) and "id" in message:
@@ -113,13 +157,15 @@ class AppServerClient:
         return True
 
     def _answer_server_request(self, message: JsonObject, method: str) -> None:
+        if method in _DECISION_REQUESTS or method == _PERMISSIONS_REQUEST:
+            raise AppServerFailure(
+                code="approval_required",
+                detail=(
+                    f"destination requested {method}; Relay cannot replace the "
+                    "source approval reviewer"
+                ),
+            )
         request_id = message.get("id")
-        if method in _DECISION_REQUESTS:
-            self._send({"id": request_id, "result": {"decision": "decline"}})
-            return
-        if method == _PERMISSIONS_REQUEST:
-            self._send({"id": request_id, "result": {"permissions": {}}})
-            return
         self._send(
             {
                 "id": request_id,

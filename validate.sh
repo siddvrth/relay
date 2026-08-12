@@ -83,7 +83,7 @@ PY
   test -f "$installed_path/skills/relay/scripts/relay.py"
   mkdir -p "$SMOKE_REPO"
   git init -q "$SMOKE_REPO"
-  installed_hook="$(cd "$SMOKE_REPO" && RELAY_CODEX_APP_TRANSPORT=disabled PLUGIN_ROOT="$installed_path" ROOT="$SMOKE_REPO" bash "$installed_path/hooks/relay_hook.sh" PreCompact <<< '{}')"
+  installed_hook="$(cd "$SMOKE_REPO" && RELAY_CODEX_APP_TRANSPORT=disabled PLUGIN_ROOT="$installed_path" ROOT="$SMOKE_REPO" bash "$installed_path/hooks/relay_hook.sh" UserPromptSubmit <<< '{"session_id":"install-smoke"}')"
   python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == {"continue": True}' "$installed_hook"
   echo "clean Codex plugin install: OK"
 else

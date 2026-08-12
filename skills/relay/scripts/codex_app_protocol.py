@@ -35,7 +35,9 @@ class ProtocolConfig:
     response_timeout: float = 30.0
     turn_timeout: float = 3600.0
     goal_objective: str | None = None
+    goal_status: str | None = None
     goal_token_budget: int | None = None
+    settings: JsonObject | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +76,7 @@ def read_thread_goal(
             response_timeout=response_timeout,
             turn_timeout=response_timeout,
         )
-        client.request("initialize", {"clientInfo": CLIENT_INFO})
+        client.request("initialize", _initialize_params())
         client.notify("initialized", {})
         result = client.request("thread/goal/get", {"threadId": thread_id})
         return _goal_snapshot(result)
@@ -106,10 +108,36 @@ def start_protocol(
                 response_timeout=config.response_timeout,
                 turn_timeout=config.turn_timeout,
             )
-            client.request("initialize", {"clientInfo": CLIENT_INFO})
+            client.request("initialize", _initialize_params())
             client.notify("initialized", {})
-            thread = client.request("thread/start", {"cwd": str(config.cwd)})
+            thread = client.request(
+                "thread/start",
+                _thread_start_params(config),
+            )
             thread_id = _nested_id(thread, "thread", "thread/start")
+            _require_thread_settings(thread, config)
+
+            turn_params: JsonObject = {
+                "threadId": thread_id,
+                "input": [
+                    {
+                        "type": "text",
+                        "text": config.continuation_prompt,
+                    }
+                ],
+                "cwd": str(config.cwd),
+            }
+            for key in (
+                "collaborationMode",
+                "effort",
+                "sandboxPolicy",
+                "summary",
+            ):
+                value = (config.settings or {}).get(key)
+                if value is not None:
+                    turn_params[key] = value
+            turn = client.request("turn/start", turn_params)
+            turn_id = _nested_id(turn, "turn", "turn/start")
 
             if config.goal_objective:
                 goal_params: JsonObject = {
@@ -118,21 +146,14 @@ def start_protocol(
                 }
                 if config.goal_token_budget is not None:
                     goal_params["tokenBudget"] = config.goal_token_budget
-                client.request("thread/goal/set", goal_params)
+                if config.goal_status is not None:
+                    goal_params["status"] = config.goal_status
+                _require_goal(
+                    client.request("thread/goal/set", goal_params),
+                    config,
+                    expected_status=goal_params.get("status"),
+                )
 
-            turn = client.request(
-                "turn/start",
-                {
-                    "threadId": thread_id,
-                    "input": [
-                        {
-                            "type": "text",
-                            "text": config.continuation_prompt,
-                        }
-                    ],
-                },
-            )
-            turn_id = _nested_id(turn, "turn", "turn/start")
             acknowledgement = ProtocolAcknowledgement(
                 thread_id=thread_id,
                 turn_id=turn_id,
@@ -140,7 +161,10 @@ def start_protocol(
             if on_acknowledged is not None:
                 on_acknowledged(acknowledgement)
 
-            client.wait_for_completion(turn_id)
+            if config.goal_objective:
+                client.wait_for_goal_terminal(thread_id)
+            else:
+                client.wait_for_completion(turn_id)
             read_result = client.request(
                 "thread/read",
                 {
@@ -179,6 +203,77 @@ def _goal_snapshot(result: JsonObject) -> GoalSnapshot | None:
             else None
         ),
     )
+
+
+def _require_goal(
+    result: JsonObject,
+    config: ProtocolConfig,
+    *,
+    expected_status: object,
+) -> None:
+    restored = _goal_snapshot(result)
+    if (
+        restored is None
+        or restored.objective != config.goal_objective
+        or restored.status != expected_status
+        or restored.token_budget != config.goal_token_budget
+    ):
+        raise AppServerFailure(
+            code="goal_restore_failed",
+            detail="thread/goal/set did not preserve the source Goal snapshot",
+        )
+
+
+def _initialize_params() -> JsonObject:
+    return {
+        "clientInfo": CLIENT_INFO,
+        "capabilities": {"experimentalApi": True},
+    }
+
+
+def _thread_start_params(config: ProtocolConfig) -> JsonObject:
+    params: JsonObject = {"cwd": str(config.cwd), "serviceName": "relay"}
+    settings = config.settings or {}
+    for key in (
+        "approvalPolicy",
+        "approvalsReviewer",
+        "model",
+        "personality",
+        "sandbox",
+        "serviceTier",
+        "permissions",
+    ):
+        value = settings.get(key)
+        if value is not None:
+            params[key] = value
+    return params
+
+
+def _require_thread_settings(result: JsonObject, config: ProtocolConfig) -> None:
+    settings = config.settings or {}
+    for requested, effective in (
+        ("approvalPolicy", "approvalPolicy"),
+        ("approvalsReviewer", "approvalsReviewer"),
+        ("model", "model"),
+    ):
+        expected = settings.get(requested)
+        if expected is not None and result.get(effective) != expected:
+            raise AppServerFailure(
+                code="settings_restore_failed",
+                detail=(
+                    f"thread/start changed {requested} from {expected!r} "
+                    f"to {result.get(effective)!r}"
+                ),
+            )
+    sandbox = result.get("sandbox")
+    expected_sandbox = settings.get("sandboxPolicy")
+    if isinstance(sandbox, dict) and isinstance(expected_sandbox, dict):
+        for key in ("type", "networkAccess"):
+            if expected_sandbox.get(key) != sandbox.get(key):
+                raise AppServerFailure(
+                    code="settings_restore_failed",
+                    detail=f"thread/start changed sandboxPolicy.{key}",
+                )
 
 
 def _nested_id(result: JsonObject, key: str, method: str) -> str:
