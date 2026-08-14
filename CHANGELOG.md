@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 - 2026-08-14
+
+- Bumped the plugin and app-server client identity after the post-0.4.0 runtime fixes so Codex installs a fresh cached package instead of reusing stale 0.4.0 hooks.
+- Added a release guard so future runtime changes cannot land without a plugin version bump.
+
 ## 0.4.0 - 2026-08-12
 
 - Rebuilt Relay around current Codex app-server Goal and token-usage APIs.

@@ -14,8 +14,13 @@ jobs:
         python-version: ["3.10", "3.11", "3.14"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Require release bump for runtime changes
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/check_release_bump.py origin/${{ github.base_ref }}
       - name: Validate package
         run: bash validate.sh

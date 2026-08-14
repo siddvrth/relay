@@ -1,6 +1,6 @@
 {
   "name": "relay",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Automatically continue long-running Codex Goals in fresh threads at 30% context usage.",
   "author": {
     "name": "siddvrth",
