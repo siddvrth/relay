@@ -177,6 +177,13 @@ def _run_chain(
         b_settings = _first_settings_context(b_path)
 
         _cross_threshold(b_path, threshold)
+        _trigger_relay(
+            client,
+            repo,
+            b,
+            "Continue the active Relay smoke Goal and hand off now.",
+            b_settings,
+        )
         c = _destination(repo, b)
         a_outcome = _wait_outcome(repo, source, "completed")
         b_goal_after = _wait_goal_status(client, b, "active")
