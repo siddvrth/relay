@@ -13,8 +13,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
+import codex_app_transport
 import relay
-from codex_app_jsonrpc import AppServerClient
+import smoke_codex_app_transport
 
 
 FAKE_CODEX = textwrap.dedent(
@@ -59,7 +60,9 @@ FAKE_CODEX = textwrap.dedent(
                     "objective": os.environ.get("FAKE_CODEX_GOAL", "keep working"),
                     "status": (
                         "complete"
-                        if turn_started and os.environ.get("FAKE_CODEX_REQUEST_APPROVAL") != "1"
+                        if turn_started
+                        and os.environ.get("FAKE_CODEX_REQUEST_APPROVAL") != "1"
+                        and os.environ.get("FAKE_CODEX_KEEP_GOAL_ACTIVE") != "1"
                         else goal_status
                     ),
                     "tokenBudget": 12345,
@@ -460,8 +463,6 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(self.state(b)["root_thread_id"], "A")
         self.assertEqual(self.state(b)["parent_thread_id"], "A")
         self.assertEqual(self.state(b)["destination_thread_id"], c)
-        self.assertEqual(self.state("A")["source_turn_id"], "turn-A")
-        self.assertEqual(self.state(b)["source_turn_id"], "turn-B")
         self.assertEqual(self.state("A")["destination_relay_sequence"], 2)
         self.assertEqual(self.state(b)["destination_relay_sequence"], 3)
 
@@ -754,35 +755,133 @@ class RelayTests(unittest.TestCase):
         stop.assert_called_once_with(4646, repo=self.repo.resolve())
         self.assertEqual(self.state("failed-cleanup")["status"], "failed")
 
-    def test_acknowledged_handoff_short_circuits_goal_polling(self) -> None:
-        handoff_state = self.root / "handoff-state.json"
-        handoff_state.write_text(
-            json.dumps(
+    def test_successor_ack_completes_worker_while_destination_goal_stays_active(
+        self,
+    ) -> None:
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"FAKE_CODEX_KEEP_GOAL_ACTIVE": "1"},
+            clear=False,
+        ):
+            response = self.call("source-A", ratio=0.31)
+            state = self.state("source-A")
+            destination_b = state["destination_thread_id"]
+            b_state_path, _ = relay._state_paths(self.repo, destination_b)
+            relay._write_state(
+                b_state_path,
                 {
                     "status": "running",
+                    "source_session_id": destination_b,
                     "destination_thread_id": "destination-C",
-                    "source_turn_id": "turn-current",
+                },
+            )
+            outcome = self.outcome("source-A", status="completed")
+
+        self.assertEqual(response["decision"], "block")
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(outcome["thread_id"], destination_b)
+        self.assertEqual(outcome["turn_id"], state["destination_turn_id"])
+        entries = self.log_entries()
+        goal_sets = [
+            entry for entry in entries if entry.get("method") == "thread/goal/set"
+        ]
+        self.assertEqual(
+            [entry["params"].get("status") for entry in goal_sets],
+            ["active"],
+        )
+        self.assertFalse(
+            any(entry.get("method") == "turn/interrupt" for entry in entries)
+        )
+
+        worker_pid = state["worker_pid"]
+        self.assertIsInstance(worker_pid, int)
+
+        def worker_group_members() -> list[str]:
+            process = subprocess.run(
+                ["ps", "-axo", "pgid=,stat=,command="],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            members: list[str] = []
+            for line in process.stdout.splitlines():
+                fields = line.strip().split(maxsplit=2)
+                if len(fields) != 3:
+                    continue
+                try:
+                    pgid = int(fields[0])
+                except ValueError:
+                    continue
+                if pgid == worker_pid and not fields[1].startswith("Z"):
+                    members.append(fields[2])
+            return members
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and (
+            codex_app_transport._pid_exists(worker_pid) or worker_group_members()
+        ):
+            time.sleep(0.02)
+        self.assertFalse(codex_app_transport._pid_exists(worker_pid))
+        self.assertEqual(worker_group_members(), [])
+
+    def test_smoke_marker_requires_an_assistant_message(self) -> None:
+        marker = "RELAY_SMOKE_C_ACK"
+        rollout = self.root / "marker-rollout.jsonl"
+        rollout.write_text(
+            json.dumps(
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": marker}],
+                    },
                 }
-            ),
+            )
+            + "\n",
             encoding="utf-8",
         )
-        client = AppServerClient.__new__(AppServerClient)
-        client._turn_timeout = 1.0
-        with mock.patch.object(
-            AppServerClient,
-            "request",
-            return_value={},
-        ) as request:
-            handed_off = AppServerClient.wait_for_goal_terminal(
-                client,
-                "source-B",
-                turn_id="turn-B",
-                handoff_state_path=handoff_state,
+        with self.assertRaisesRegex(RuntimeError, "completed assistant message"):
+            smoke_codex_app_transport._wait_agent_message(
+                rollout,
+                marker,
+                timeout=0.05,
             )
-        self.assertTrue(handed_off)
-        request.assert_called_once_with(
-            "turn/interrupt",
-            {"threadId": "source-B", "turnId": "turn-current"},
+
+        with rollout.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {"type": "agent_message", "message": marker},
+                    }
+                )
+                + "\n"
+            )
+        with self.assertRaisesRegex(RuntimeError, "completed assistant message"):
+            smoke_codex_app_transport._wait_agent_message(
+                rollout,
+                marker,
+                timeout=0.05,
+            )
+
+        with rollout.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "task_complete",
+                            "last_agent_message": marker,
+                        },
+                    }
+                )
+                + "\n"
+            )
+        smoke_codex_app_transport._wait_agent_message(
+            rollout,
+            marker,
+            timeout=0.1,
         )
 
     def test_circuit_breaker_blocks_before_cleaning_other_chain_workers(self) -> None:

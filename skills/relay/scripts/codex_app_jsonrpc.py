@@ -100,33 +100,16 @@ class AppServerClient:
         self,
         thread_id: str,
         *,
-        turn_id: str,
         handoff_state_path: Path | None = None,
     ) -> bool:
-        """Wait until Goal Mode terminates or hands off to another Relay thread."""
+        """Wait until Goal Mode terminates or the destination hands off again."""
 
         deadline = time.monotonic() + self._turn_timeout
         while True:
-            handoff = (
-                _handoff_state(handoff_state_path)
-                if handoff_state_path is not None
-                else None
-            )
-            if handoff is not None:
-                active_turn_id = handoff.get("source_turn_id")
-                if not isinstance(active_turn_id, str) or not active_turn_id:
-                    active_turn_id = turn_id
-                try:
-                    self.request(
-                        "turn/interrupt",
-                        {"threadId": thread_id, "turnId": active_turn_id},
-                    )
-                except AppServerFailure:
-                    # The turn may already have stopped between the durable
-                    # handoff acknowledgement and this interrupt request.
-                    # The caller will close the worker-owned app-server
-                    # connection immediately after this return.
-                    pass
+            if handoff_state_path is not None and _handoff_acknowledged(
+                handoff_state_path,
+                source_thread_id=thread_id,
+            ):
                 return True
             result = self.request("thread/goal/get", {"threadId": thread_id})
             goal = result.get("goal")
@@ -283,20 +266,16 @@ class AppServerClient:
         return True
 
 
-def _handoff_acknowledged(path: Path) -> bool:
-    return _handoff_state(path) is not None
-
-
-def _handoff_state(path: Path) -> JsonObject | None:
+def _handoff_acknowledged(path: Path, *, source_thread_id: str) -> bool:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(value, dict):
-        return None
-    if value.get("status") != "running":
-        return None
-    destination = value.get("destination_thread_id")
-    if not isinstance(destination, str) or not destination:
-        return None
-    return value
+        return False
+    return bool(
+        isinstance(value, dict)
+        and value.get("status") == "running"
+        and value.get("source_session_id") == source_thread_id
+        and isinstance(value.get("destination_thread_id"), str)
+        and value["destination_thread_id"]
+        and value["destination_thread_id"] != source_thread_id
+    )

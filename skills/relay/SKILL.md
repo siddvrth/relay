@@ -50,10 +50,10 @@ It contains the source and destination IDs, repository path, Goal objective,
 threshold observation, changed-file hint, next action, stable chain ID, Relay
 sequence, original title, progress fingerprint, and presentation status. A
 sibling lock file serializes duplicate hooks. Goal/settings read failures and
-pre-ack launch or presentation failures fail open. `SessionEnd` kills detached
-worker process groups and persists cancellation outcomes. A worker outcome
-record detects destination failure after acknowledgement so the next eligible
-source hook can retry instead of remaining permanently quiesced.
+pre-ack launch or presentation failures fail open. The worker writes a completed
+outcome and closes its app-server when the destination Goal becomes terminal or
+the destination acknowledges its own successor; `SessionEnd` remains a fallback
+that kills detached worker process groups and persists cancellation outcomes.
 
 Desktop success requires an external exact presentation proof. A persisted
 thread, `thread/read`, or `thread/loaded/list` is not proof that the Desktop

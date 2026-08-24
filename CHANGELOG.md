@@ -2,6 +2,7 @@
 
 ## 0.5.0 - 2026-08-23
 
+- Fixed worker completion after a destination acknowledges its successor, without completing the predecessor Goal or interrupting its turn.
 - Added control-operation bypasses, terminal worker cleanup, and a repeated-no-progress circuit breaker.
 - Added deterministic Relay chain identity, sequence names, and original-title preservation.
 - Added optional exact Desktop presentation proof.

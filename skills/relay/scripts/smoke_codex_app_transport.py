@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 import context_usage
-from codex_app_jsonrpc import AppServerClient, AppServerFailure
+from codex_app_jsonrpc import AppServerClient
 from codex_app_protocol import CLIENT_INFO
 
 
@@ -26,8 +26,8 @@ GOAL = (
     "real file or shell tool, read it back, emit RELAY_SMOKE_B_WORK_DONE, and "
     "do not complete the Goal. Keep the Goal active and repeatedly run harmless "
     "git status checks until Relay hands off. In the next successor whose "
-    "continuation reports RELAY_SMOKE_B_WORK_DONE, use no workspace tools, mark "
-    "this same Goal complete, and reply RELAY_SMOKE_C_ACK."
+    "continuation reports RELAY_SMOKE_B_WORK_DONE, use no workspace tools, reply "
+    "RELAY_SMOKE_C_ACK, and leave the Goal active for harness-controlled completion."
 )
 MODEL = "gpt-5.6-luna"
 EFFORT = "low"
@@ -86,7 +86,7 @@ def main() -> int:
         _trust_installed_relay_hooks(codex, environment, home, repo)
         try:
             try:
-                result = _run_chain(codex, environment, home, repo)
+                result = _run_chain(codex, environment, home, repo, installed)
             except Exception:
                 failure_dir = os.environ.get("RELAY_SMOKE_FAILURE_DIR")
                 if failure_dir:
@@ -118,6 +118,7 @@ def _run_chain(
     environment: dict[str, str],
     home: Path,
     repo: Path,
+    installed: Path,
 ) -> dict[str, object]:
     seed_process = _server(codex, repo, environment)
     seed_client = _client(seed_process)
@@ -157,53 +158,76 @@ def _run_chain(
     trigger_environment = dict(environment)
     trigger_environment["RELAY_THRESHOLD"] = f"{threshold:.6f}"
     _cross_threshold(source_path, threshold)
-    process = _server(codex, repo, trigger_environment)
-    client = _client(process)
+    process: subprocess.Popen[bytes] | None = None
     try:
-        client.request("thread/resume", {"threadId": source})
-        _trigger_relay(
-            client,
+        _invoke_installed_hook(
+            installed,
             repo,
+            trigger_environment,
             source,
+            source_path,
             "Continue the active Relay smoke Goal now.",
-            source_settings,
         )
         b = _destination(repo, source)
+        a_state = _wait_state(repo, source)
         b_path = _wait_thread_path(home, b)
         marker = repo / "relay-smoke-B.txt"
         marker_ok = _wait_marker(marker) == "B_WORK_OK"
-        _wait_rollout_contains(b_path, "RELAY_SMOKE_B_WORK_DONE")
-        b_goal_before = _wait_goal_status(client, b, "active")
+        _wait_agent_message(b_path, "RELAY_SMOKE_B_WORK_DONE", timeout=90)
+        b_goal_before = _wait_goal_status_isolated(
+            codex,
+            repo,
+            trigger_environment,
+            b,
+            "active",
+        )
         b_settings = _first_settings_context(b_path)
 
         _cross_threshold(b_path, threshold)
-        _trigger_relay(
-            client,
+        _invoke_installed_hook(
+            installed,
             repo,
+            trigger_environment,
             b,
+            b_path,
             "Continue the active Relay smoke Goal and hand off now.",
-            b_settings,
         )
         c = _destination(repo, b)
+        b_state = _wait_state(repo, b)
         a_outcome = _wait_outcome(repo, source, "completed")
-        b_goal_after = _wait_goal_status(client, b, "active")
-        _wait_outcome(repo, b, "completed")
+        b_goal_after = _wait_goal_status_isolated(
+            codex,
+            repo,
+            trigger_environment,
+            b,
+            "active",
+        )
+        _require_worker_cleanup(a_state, label="A-to-B")
 
+        c_path = _wait_thread_path(home, c)
+        _wait_agent_message(c_path, "RELAY_SMOKE_C_ACK", timeout=90)
+        process = _server(codex, repo, trigger_environment)
+        client = _client(process)
+        c_goal_before_control = _wait_goal_status(client, c, "active")
+        completed_goal = client.request(
+            "thread/goal/set",
+            {"threadId": c, "status": "complete"},
+        ).get("goal")
+        if (
+            not isinstance(completed_goal, dict)
+            or completed_goal.get("status") != "complete"
+        ):
+            raise RuntimeError("thread/goal/set did not complete C's Goal")
+        c_goal = _wait_goal_status(client, c, "complete")
+        b_outcome = _wait_outcome(repo, b, "completed")
+        _require_worker_cleanup(b_state, label="B-to-C")
         c_thread = _read_thread(client, c)
-        c_path = _thread_path(client, home, c)
-        c_goal = _goal(client, c)
+        _stop(process)
         c_settings = _first_settings_context(c_path)
         thread_ids_before_retry_check = _session_thread_ids(home, repo)
 
-        _trigger_relay(
-            client,
-            repo,
-            source,
-            "Verify that ownership remains with the Relay successor.",
-            {},
-        )
+        time.sleep(0.5)
         thread_ids = _session_thread_ids(home, repo)
-        a_state = _wait_state(repo, source)
 
         expected = _settings_fingerprint(_first_settings_context(source_path))
         b_fingerprint = _settings_fingerprint(b_settings)
@@ -229,9 +253,11 @@ def _run_chain(
             and b_goal_before.get("objective") == GOAL
             and b_goal_after.get("objective") == GOAL
             and c_goal.get("objective") == GOAL
+            and c_goal_before_control.get("status") == "active"
             and c_goal.get("status") == "complete"
             and b_stayed_active
             and a_did_not_retry
+            and b_outcome.get("status") == "completed"
             and expected == b_fingerprint == c_fingerprint
             and thread_ids == {source, b, c}
         )
@@ -240,6 +266,8 @@ def _run_chain(
             "source_thread_id": source,
             "first_destination_thread_id": b,
             "second_destination_thread_id": c,
+            "first_destination_name": a_state.get("destination_thread_name"),
+            "second_destination_name": b_state.get("destination_thread_name"),
             "marker_ok": marker_ok,
             "goal_preserved": (
                 b_goal_before.get("objective")
@@ -248,8 +276,14 @@ def _run_chain(
                 == GOAL
             ),
             "b_goal_stayed_active": b_stayed_active,
+            "c_goal_active_before_control": (
+                c_goal_before_control.get("status") == "active"
+            ),
             "c_goal_completed": c_goal.get("status") == "complete",
             "a_did_not_retry": a_did_not_retry,
+            "a_worker_outcome": a_outcome.get("status"),
+            "b_worker_outcome": b_outcome.get("status"),
+            "worker_cleanup": True,
             "settings_preserved": expected == b_fingerprint == c_fingerprint,
             "thread_count": len(thread_ids),
             "no_duplicates": thread_ids == {source, b, c},
@@ -263,7 +297,8 @@ def _run_chain(
             result["second_destination_settings"] = c_fingerprint
         return result
     finally:
-        _stop(process)
+        if process is not None:
+            _stop(process)
 
 
 def _settings(repo: Path) -> dict[str, object]:
@@ -311,31 +346,57 @@ def _turn(
     return turn_id
 
 
-def _trigger_relay(
-    client: AppServerClient,
+def _invoke_installed_hook(
+    installed: Path,
     repo: Path,
+    environment: dict[str, str],
     thread_id: str,
+    transcript_path: Path,
     prompt: str,
-    settings: dict[str, object],
 ) -> None:
-    # A destination is created by Relay's detached worker, which owns a
-    # separate app-server connection.  Rejoin the persisted destination on
-    # this verification connection before asking it to emit the next native
-    # turn; otherwise a valid B thread can exist on disk while this control
-    # connection reports it as unloaded and silently skips the C trigger.
-    try:
-        client.request("thread/resume", {"threadId": thread_id})
-    except AppServerFailure:
-        pass
-    params: dict[str, object] = {
-        "threadId": thread_id,
-        "input": [{"type": "text", "text": prompt}],
-        **settings,
+    payload = {
+        "session_id": thread_id,
+        "cwd": str(repo),
+        "prompt": prompt,
+        "transcript_path": str(transcript_path),
     }
+    hook_environment = dict(environment)
+    hook_environment.update(
+        {
+            "PLUGIN_ROOT": str(installed),
+            "ROOT": str(repo),
+        }
+    )
     try:
-        client.request("turn/start", params)
-    except AppServerFailure:
-        pass
+        result = subprocess.run(
+            ["bash", str(installed / "hooks" / "relay_hook.sh"), "UserPromptSubmit"],
+            cwd=repo,
+            env=hook_environment,
+            input=json.dumps(payload, separators=(",", ":")),
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"installed Relay hook failed to run: {error}") from error
+    try:
+        response = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            f"installed Relay hook returned invalid JSON: {result.stdout!r}"
+        ) from error
+    if (
+        result.returncode != 0
+        or not isinstance(response, dict)
+        or response.get("decision") != "block"
+        or response.get("continue") is not False
+    ):
+        raise RuntimeError(
+            "installed Relay hook did not acknowledge handoff: "
+            f"returncode={result.returncode}; response={response!r}; "
+            f"stderr={result.stderr!r}"
+        )
     _wait_state(repo, thread_id)
 
 
@@ -369,9 +430,15 @@ def _wait_state(repo: Path, source: str) -> dict[str, object]:
     raise RuntimeError(f"timed out waiting for Relay state for {source}")
 
 
-def _wait_outcome(repo: Path, source: str, status: str) -> dict[str, object]:
+def _wait_outcome(
+    repo: Path,
+    source: str,
+    status: str,
+    *,
+    timeout: float = 15.0,
+) -> dict[str, object]:
     path = _state_path(repo, source).with_suffix(".outcome.json")
-    deadline = time.monotonic() + 300
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -391,6 +458,48 @@ def _wait_outcome(repo: Path, source: str, status: str) -> dict[str, object]:
     raise RuntimeError(
         f"timed out waiting for {source} outcome {status}; state={state!r}"
     )
+
+
+def _require_worker_cleanup(
+    state: dict[str, object],
+    *,
+    label: str,
+    timeout: float = 10.0,
+) -> None:
+    worker_pid = state.get("worker_pid")
+    if not isinstance(worker_pid, int) or isinstance(worker_pid, bool):
+        raise RuntimeError(f"{label} state has no worker pid: {state!r}")
+    deadline = time.monotonic() + timeout
+    members = _live_process_group_members(worker_pid)
+    while members and time.monotonic() < deadline:
+        time.sleep(0.05)
+        members = _live_process_group_members(worker_pid)
+    if members:
+        raise RuntimeError(
+            f"{label} worker did not exit promptly; "
+            f"live_process_group={members!r}; state={state!r}"
+        )
+
+
+def _live_process_group_members(pgid: int) -> list[str]:
+    result = subprocess.run(
+        ["ps", "-axo", "pgid=,stat=,command="],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    members: list[str] = []
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(maxsplit=2)
+        if len(fields) != 3:
+            continue
+        try:
+            candidate = int(fields[0])
+        except ValueError:
+            continue
+        if candidate == pgid and not fields[1].startswith("Z"):
+            members.append(fields[2])
+    return members
 
 
 def _state_path(repo: Path, source: str) -> Path:
@@ -473,6 +582,21 @@ def _wait_goal_status(
     raise RuntimeError(f"timed out waiting for {thread_id} Goal status {status}")
 
 
+def _wait_goal_status_isolated(
+    codex: Path,
+    repo: Path,
+    environment: dict[str, str],
+    thread_id: str,
+    status: str,
+) -> dict[str, object]:
+    process = _server(codex, repo, environment)
+    client = _client(process)
+    try:
+        return _wait_goal_status(client, thread_id, status)
+    finally:
+        _stop(process)
+
+
 def _thread_path(client: AppServerClient, home: Path, thread_id: str) -> Path:
     value = _read_thread(client, thread_id).get("path")
     if isinstance(value, str) and Path(value).is_file():
@@ -493,8 +617,8 @@ def _wait_thread_path(home: Path, thread_id: str) -> Path:
     raise RuntimeError(f"timed out waiting for rollout {thread_id}")
 
 
-def _wait_marker(path: Path) -> str:
-    deadline = time.monotonic() + 300
+def _wait_marker(path: Path, *, timeout: float = 120.0) -> str:
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             value = path.read_text(encoding="utf-8").strip()
@@ -507,16 +631,30 @@ def _wait_marker(path: Path) -> str:
     raise RuntimeError("timed out waiting for real B workspace action")
 
 
-def _wait_rollout_contains(path: Path, text: str) -> None:
-    deadline = time.monotonic() + 300
+def _wait_agent_message(path: Path, text: str, *, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            if text in path.read_text(encoding="utf-8"):
-                return
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    payload = record.get("payload") if isinstance(record, dict) else None
+                    if (
+                        isinstance(record, dict)
+                        and record.get("type") == "event_msg"
+                        and isinstance(payload, dict)
+                        and payload.get("type") == "task_complete"
+                        and isinstance(payload.get("last_agent_message"), str)
+                        and text in payload["last_agent_message"]
+                    ):
+                        return
         except OSError:
             pass
         time.sleep(0.05)
-    raise RuntimeError(f"timed out waiting for {text}")
+    raise RuntimeError(f"timed out waiting for completed assistant message {text}")
 
 
 def _session_thread_ids(home: Path, repo: Path) -> set[str]:

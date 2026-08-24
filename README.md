@@ -58,9 +58,9 @@ record exposed by `transcript_path`. Direct `thread/tokenUsage/updated`
 notifications are accepted only by the parser's diagnostic/test surface.
 Unknown or missing telemetry fails open. One small atomic JSON record plus a
 worker outcome record per source thread provide duplicate suppression and
-post-launch recovery; no transcript is copied and no manual state seed is
-required. Runtime state also records the chain ID, sequence, original title,
-progress fingerprint, and presentation status.
+destination lifecycle completion; no transcript is copied and no manual state
+seed is required. Runtime state also records the chain ID, sequence, original
+title, progress fingerprint, and presentation status.
 
 For a Desktop handoff, set `RELAY_DESKTOP_HANDOFF=1`. Relay invokes the
 configured Desktop bridge with a `codex://threads/<thread-id>` deep link, then

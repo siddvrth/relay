@@ -269,7 +269,6 @@ def start_protocol(
             if config.goal_objective:
                 handed_off = client.wait_for_goal_terminal(
                     thread_id,
-                    turn_id=turn_id,
                     handoff_state_path=_relay_state_path(config.cwd, thread_id),
                 )
             else:

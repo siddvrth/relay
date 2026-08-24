@@ -58,9 +58,11 @@ def launch(
 ) -> LaunchResult:
     """Start the worker and wait until the destination is safely acknowledged.
 
-    The worker stays detached and owns the long-running continuation turn.  The
-    hook process therefore returns promptly after the destination is real and,
-    for Desktop mode, the exact presentation proof has been observed.
+    The worker stays detached while the destination owns the Goal, then closes
+    its app-server and writes a completed outcome when that Goal becomes
+    terminal or the destination acknowledges its own successor. The hook
+    process returns promptly after the destination is real and, for Desktop
+    mode, the exact presentation proof has been observed.
     """
 
     try:
@@ -421,10 +423,10 @@ def _pid_exists(pid: int) -> bool:
 
 
 def _release_worker_handle(worker: subprocess.Popen[bytes]) -> None:
-    """Let the hook process exit while the detached worker owns the turn."""
+    """Let the hook exit while the worker supervises the destination."""
 
     # The worker is deliberately orphaned when this short-lived hook exits;
-    # launchd/systemd reaps it after the fresh turn completes.  Marking the
+    # launchd/systemd reaps it after terminal/successor cleanup. Marking the
     # local Popen handle as detached avoids a false ResourceWarning in Python.
     setattr(worker, "_child_created", False)
 
