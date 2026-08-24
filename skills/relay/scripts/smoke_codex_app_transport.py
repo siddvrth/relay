@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -80,7 +81,22 @@ def main() -> int:
         )
         _trust_installed_relay_hooks(codex, environment, home, repo)
         try:
-            result = _run_chain(codex, environment, home, repo)
+            try:
+                result = _run_chain(codex, environment, home, repo)
+            except Exception:
+                failure_dir = os.environ.get("RELAY_SMOKE_FAILURE_DIR")
+                if failure_dir:
+                    destination = Path(failure_dir).expanduser().resolve()
+                    if destination.exists():
+                        raise RuntimeError(
+                            f"smoke failure directory already exists: {destination}"
+                        )
+                    shutil.copytree(root, destination)
+                    print(
+                        f"real smoke artifacts preserved at {destination}",
+                        file=sys.stderr,
+                    )
+                raise
         finally:
             try:
                 from relay import cleanup_workers
@@ -356,7 +372,14 @@ def _wait_outcome(repo: Path, source: str, status: str) -> dict[str, object]:
         if isinstance(value, dict) and value.get("status") == "failed":
             raise RuntimeError(str(value.get("error") or "Relay destination failed"))
         time.sleep(0.1)
-    raise RuntimeError(f"timed out waiting for {source} outcome {status}")
+    state_path = _state_path(repo, source)
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        state = None
+    raise RuntimeError(
+        f"timed out waiting for {source} outcome {status}; state={state!r}"
+    )
 
 
 def _state_path(repo: Path, source: str) -> Path:
