@@ -59,11 +59,19 @@ def main() -> int:
         codex = Path(codex_value).resolve()
         installed = _install_plugin(home, marketplace, codex)
         environment = os.environ.copy()
+        for variable in (
+            "OMO_CODEX_HOOKS_DISABLED",
+            "CODEX_HOOKS_DISABLED",
+            "RELAY_DESKTOP_HANDOFF",
+        ):
+            environment.pop(variable, None)
         environment.update(
             {
                 "CODEX_HOME": str(home),
                 "PLUGIN_ROOT": str(installed),
                 "RELAY_CODEX_BINARY": str(codex),
+                "CODEX_INTERNAL_ORIGINATOR_OVERRIDE": "",
+                "RELAY_PRESENTATION_MODE": "headless",
                 "RELAY_THRESHOLD": SEED_THRESHOLD,
                 "RELAY_APP_SERVER_RESPONSE_TIMEOUT": "30",
                 "RELAY_APP_SERVER_TURN_TIMEOUT": "300",
@@ -321,8 +329,15 @@ def _wait_state(repo: Path, source: str) -> dict[str, object]:
         except (FileNotFoundError, json.JSONDecodeError):
             time.sleep(0.05)
             continue
-        if isinstance(value, dict) and value.get("status") == "running":
-            return value
+        if isinstance(value, dict):
+            status = value.get("status")
+            if status == "running":
+                return value
+            if status in {"failed", "circuit_breaker"}:
+                raise RuntimeError(
+                    f"Relay state for {source} stopped with {status}: "
+                    f"{value.get('error') or 'no error recorded'}"
+                )
         time.sleep(0.05)
     raise RuntimeError(f"timed out waiting for Relay state for {source}")
 
