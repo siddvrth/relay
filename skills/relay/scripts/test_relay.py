@@ -235,6 +235,7 @@ class RelayTests(unittest.TestCase):
         *,
         ratio: float,
         event: str = "UserPromptSubmit",
+        turn_id: str | None = None,
         tool_name: str | None = None,
         tool_input: dict[str, object] | None = None,
     ) -> dict:
@@ -244,6 +245,8 @@ class RelayTests(unittest.TestCase):
             "prompt": "Continue the release validation",
             "transcript_path": str(self.transcript),
         }
+        if turn_id is not None:
+            payload["turn_id"] = turn_id
         if tool_name is not None:
             payload["tool_name"] = tool_name
         if tool_input is not None:
@@ -411,10 +414,10 @@ class RelayTests(unittest.TestCase):
 
     def test_actual_destination_b_relay_becomes_actual_destination_c(self) -> None:
         with self.env():
-            first = self.call("A", ratio=0.31)
+            first = self.call("A", ratio=0.31, turn_id="turn-A")
             self.outcome("A", status="completed")
             b = self.state("A")["destination_thread_id"]
-            second = self.call(b, ratio=0.31)
+            second = self.call(b, ratio=0.31, turn_id="turn-B")
             self.outcome(b, status="completed")
             c = self.state(b)["destination_thread_id"]
         self.assertEqual(first["decision"], "block")
@@ -457,6 +460,8 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(self.state(b)["root_thread_id"], "A")
         self.assertEqual(self.state(b)["parent_thread_id"], "A")
         self.assertEqual(self.state(b)["destination_thread_id"], c)
+        self.assertEqual(self.state("A")["source_turn_id"], "turn-A")
+        self.assertEqual(self.state(b)["source_turn_id"], "turn-B")
         self.assertEqual(self.state("A")["destination_relay_sequence"], 2)
         self.assertEqual(self.state(b)["destination_relay_sequence"], 3)
 
@@ -756,6 +761,7 @@ class RelayTests(unittest.TestCase):
                 {
                     "status": "running",
                     "destination_thread_id": "destination-C",
+                    "source_turn_id": "turn-current",
                 }
             ),
             encoding="utf-8",
@@ -776,7 +782,7 @@ class RelayTests(unittest.TestCase):
         self.assertTrue(handed_off)
         request.assert_called_once_with(
             "turn/interrupt",
-            {"threadId": "source-B", "turnId": "turn-B"},
+            {"threadId": "source-B", "turnId": "turn-current"},
         )
 
     def test_circuit_breaker_blocks_before_cleaning_other_chain_workers(self) -> None:

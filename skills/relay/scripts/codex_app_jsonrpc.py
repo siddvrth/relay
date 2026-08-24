@@ -107,13 +107,19 @@ class AppServerClient:
 
         deadline = time.monotonic() + self._turn_timeout
         while True:
-            if handoff_state_path is not None and _handoff_acknowledged(
-                handoff_state_path
-            ):
+            handoff = (
+                _handoff_state(handoff_state_path)
+                if handoff_state_path is not None
+                else None
+            )
+            if handoff is not None:
+                active_turn_id = handoff.get("source_turn_id")
+                if not isinstance(active_turn_id, str) or not active_turn_id:
+                    active_turn_id = turn_id
                 try:
                     self.request(
                         "turn/interrupt",
-                        {"threadId": thread_id, "turnId": turn_id},
+                        {"threadId": thread_id, "turnId": active_turn_id},
                     )
                 except AppServerFailure:
                     # The turn may already have stopped between the durable
@@ -278,13 +284,19 @@ class AppServerClient:
 
 
 def _handoff_acknowledged(path: Path) -> bool:
+    return _handoff_state(path) is not None
+
+
+def _handoff_state(path: Path) -> JsonObject | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return False
-    return bool(
-        isinstance(value, dict)
-        and value.get("status") == "running"
-        and isinstance(value.get("destination_thread_id"), str)
-        and value["destination_thread_id"]
-    )
+        return None
+    if not isinstance(value, dict):
+        return None
+    if value.get("status") != "running":
+        return None
+    destination = value.get("destination_thread_id")
+    if not isinstance(destination, str) or not destination:
+        return None
+    return value
