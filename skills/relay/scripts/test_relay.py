@@ -954,7 +954,11 @@ class RelayTests(unittest.TestCase):
 
         protected_state, protected_outcome = write_worker_state("B", "C", 111)
         child_state, child_outcome = write_worker_state("C", "D", 222)
-        with mock.patch.object(relay, "stop_worker_pid", return_value=True) as stop:
+        with mock.patch.object(
+            relay,
+            "_worker_pids",
+            return_value={111, 222},
+        ), mock.patch.object(relay, "stop_worker_pid", return_value=True) as stop:
             result = relay.cleanup_workers(
                 self.repo,
                 chain_id=chain_id,

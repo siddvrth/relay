@@ -1297,6 +1297,7 @@ def cleanup_workers(
     skipped: list[int] = []
     matching_states: list[tuple[Path, dict[str, Any]]] = []
     worker_pids: set[int] = set()
+    protected_worker_pids: set[int] = set()
     for path in _state_files(repo):
         state = _read_state(path)
         if not state:
@@ -1312,6 +1313,9 @@ def cleanup_workers(
             # This state owns the worker that is currently running the hook.
             # Leave both its outcome and process group alone so a preceding
             # Goal transition can let that worker shut down cleanly.
+            protected_pid = _int_value(state.get("worker_pid"))
+            if protected_pid is not None:
+                protected_worker_pids.add(protected_pid)
             continue
         matching_states.append((path, state))
         pid = _int_value(state.get("worker_pid"))
@@ -1338,6 +1342,7 @@ def cleanup_workers(
     worker_pids.update(
         _worker_pids(repo, chain_id=chain_id, session_id=session_id)
     )
+    worker_pids.difference_update(protected_worker_pids)
     for pid in sorted(worker_pids):
         if stop_worker_pid(pid, repo=repo):
             cleaned.append(pid)
