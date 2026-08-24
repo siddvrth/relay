@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-08-23
+
+- Added control-operation bypasses, terminal worker cleanup, and a repeated-no-progress circuit breaker.
+- Added deterministic Relay chain identity, sequence names, and original-title preservation.
+- Added optional exact Desktop presentation proof.
+
 ## 0.4.1 - 2026-08-14
 
 - Bumped the plugin and app-server client identity after the post-0.4.0 runtime fixes so Codex installs a fresh cached package instead of reusing stale 0.4.0 hooks.

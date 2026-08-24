@@ -33,6 +33,10 @@ EFFORT = "low"
 SEED_THRESHOLD = "1.0"
 
 
+def _approval_policy() -> str:
+    return os.environ.get("RELAY_SMOKE_APPROVAL_POLICY", "on-request")
+
+
 def main() -> int:
     codex_value = shutil.which("codex")
     auth = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "auth.json"
@@ -70,6 +74,12 @@ def main() -> int:
         try:
             result = _run_chain(codex, environment, home, repo)
         finally:
+            try:
+                from relay import cleanup_workers
+
+                cleanup_workers(repo)
+            except (ImportError, OSError, ValueError, TypeError):
+                pass
             _stop_relay_workers(repo)
         print(json.dumps(result, sort_keys=True))
         return 0 if result.get("ok") is True else 1
@@ -90,7 +100,7 @@ def _run_chain(
             {
                 "cwd": str(repo),
                 "model": MODEL,
-                "approvalPolicy": "on-request",
+                "approvalPolicy": _approval_policy(),
                 "approvalsReviewer": "auto_review",
                 "sandbox": "workspace-write",
                 "personality": "pragmatic",
@@ -227,7 +237,7 @@ def _settings(repo: Path) -> dict[str, object]:
         "model": MODEL,
         "effort": EFFORT,
         "personality": "pragmatic",
-        "approvalPolicy": "on-request",
+        "approvalPolicy": _approval_policy(),
         "approvalsReviewer": "auto_review",
         "sandboxPolicy": {
             "type": "workspaceWrite",
@@ -273,6 +283,15 @@ def _trigger_relay(
     prompt: str,
     settings: dict[str, object],
 ) -> None:
+    # A destination is created by Relay's detached worker, which owns a
+    # separate app-server connection.  Rejoin the persisted destination on
+    # this verification connection before asking it to emit the next native
+    # turn; otherwise a valid B thread can exist on disk while this control
+    # connection reports it as unloaded and silently skips the C trigger.
+    try:
+        client.request("thread/resume", {"threadId": thread_id})
+    except AppServerFailure:
+        pass
     params: dict[str, object] = {
         "threadId": thread_id,
         "input": [{"type": "text", "text": prompt}],
@@ -523,8 +542,8 @@ def _trust_installed_relay_hooks(
         if item.get("source") == "plugin"
         and item.get("pluginId") == "relay@relay-smoke"
     ]
-    if len(relay_hooks) != 2:
-        raise RuntimeError(f"expected two installed Relay hooks, got {relay_hooks!r}")
+    if len(relay_hooks) != 3:
+        raise RuntimeError(f"expected three installed Relay hooks, got {relay_hooks!r}")
 
     blocks: list[str] = []
     for hook in relay_hooks:
@@ -555,7 +574,7 @@ def _trust_installed_relay_hooks(
         if item.get("source") == "plugin"
         and item.get("pluginId") == "relay@relay-smoke"
     }
-    if len(relay_trust) != 2 or set(relay_trust.values()) != {"trusted"}:
+    if len(relay_trust) != len(relay_hooks) or set(relay_trust.values()) != {"trusted"}:
         raise RuntimeError(f"installed Relay hooks are not trusted: {relay_trust!r}")
 
 
