@@ -62,15 +62,18 @@ destination lifecycle completion; no transcript is copied and no manual state
 seed is required. Runtime state also records the chain ID, sequence, original
 title, progress fingerprint, and presentation status.
 
-For a Desktop handoff, set `RELAY_DESKTOP_HANDOFF=1`. Relay invokes the
-configured Desktop bridge with a `codex://threads/<thread-id>` deep link, then
-waits for an exact presentation proof before acknowledging the source.
-Configure `RELAY_DESKTOP_PRESENTATION_COMMAND` for the bridge; it receives a
-JSON request on stdin and must write `RELAY_DESKTOP_ACK_PATH` containing
-`presented: true`, the exact `selected_thread_id`, `thread_id`, `turn_id`,
-`source_thread_id`, `chain_id`, and `relay_sequence`. Without that proof the handoff fails open and
-the source remains usable. Persistence, `thread/read`, or `thread/loaded/list`
-alone are not Desktop visibility evidence.
+For a Desktop handoff, set `RELAY_DESKTOP_HANDOFF=1` and provide
+`RELAY_DESKTOP_PRESENTATION_COMMAND`. This is a host dependency: the current
+Codex app-server exposes no supported Desktop focus/select request, so Relay
+does not claim automatic Desktop visibility in a normal install without it.
+The bridge receives a JSON request on stdin, opens/selects the exact
+`codex://threads/<thread-id>` destination through a supported host mechanism,
+verifies the exact selected destination, and writes `RELAY_DESKTOP_ACK_PATH`
+containing `presented: true`, the exact `selected_thread_id`, `thread_id`,
+`turn_id`, `source_thread_id`, `chain_id`, and `relay_sequence`. Without that
+proof the handoff fails open and the source remains usable. Persistence,
+`thread/read`, or `thread/loaded/list` alone are not Desktop visibility
+evidence.
 
 `/compact` keeps the same thread and summarizes earlier conversation. Relay
 adds fresh-thread startup overhead in exchange for a new context window and a

@@ -1231,7 +1231,6 @@ def _progress_fingerprint(
         {
             "objective": goal.objective,
             "status": goal.status,
-            "tokens_used": goal.tokens_used,
             "changed_files": files,
             "recent_progress": progress or "",
         },

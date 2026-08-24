@@ -66,6 +66,7 @@ FAKE_CODEX = textwrap.dedent(
                         else goal_status
                     ),
                     "tokenBudget": 12345,
+                    "tokensUsed": int(os.environ.get("FAKE_CODEX_TOKENS_USED", "0")),
                 }}})
         elif method == "thread/start":
             with log_path.open("r", encoding="utf-8") as handle:
@@ -401,6 +402,44 @@ class RelayTests(unittest.TestCase):
             len([x for x in self.log_entries() if x.get("method") == "thread/start"]),
             2,
         )
+
+    def test_no_progress_circuit_breaker_ignores_increasing_goal_tokens(self) -> None:
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"RELAY_NO_PROGRESS_LIMIT": "2"},
+            clear=False,
+        ):
+            with mock.patch.dict(os.environ, {"FAKE_CODEX_TOKENS_USED": "100"}):
+                self.call("A", ratio=0.31)
+            self.outcome("A", status="completed")
+            b = self.state("A")["destination_thread_id"]
+
+            with mock.patch.dict(os.environ, {"FAKE_CODEX_TOKENS_USED": "200"}):
+                self.call(b, ratio=0.31)
+            self.outcome(b, status="completed")
+            c = self.state(b)["destination_thread_id"]
+
+            with mock.patch.dict(os.environ, {"FAKE_CODEX_TOKENS_USED": "300"}):
+                first_breaker_call = self.call(c, ratio=0.31)
+            starts_at_breaker = len(
+                [x for x in self.log_entries() if x.get("method") == "thread/start"]
+            )
+            state = self.state(c)
+
+            with mock.patch.dict(os.environ, {"FAKE_CODEX_TOKENS_USED": "400"}):
+                after_breaker_call = self.call(c, ratio=0.31)
+            starts_after_breaker = len(
+                [x for x in self.log_entries() if x.get("method") == "thread/start"]
+            )
+
+        self.assertEqual(first_breaker_call, {"continue": True})
+        self.assertEqual(after_breaker_call, {"continue": True})
+        self.assertEqual(state["status"], "circuit_breaker")
+        self.assertEqual(state["circuit_breaker"], "repeated_no_progress")
+        self.assertEqual(state["no_progress_count"], 2)
+        self.assertEqual(state["goal_status"], "blocked")
+        self.assertEqual(starts_at_breaker, 2)
+        self.assertEqual(starts_after_breaker, 2)
 
     def test_reused_destination_id_fails_open_without_quiescing_source(self) -> None:
         with self.env(), mock.patch.dict(

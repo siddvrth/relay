@@ -55,10 +55,14 @@ outcome and closes its app-server when the destination Goal becomes terminal or
 the destination acknowledges its own successor; `SessionEnd` remains a fallback
 that kills detached worker process groups and persists cancellation outcomes.
 
-Desktop success requires an external exact presentation proof. A persisted
-thread, `thread/read`, or `thread/loaded/list` is not proof that the Desktop
-window selected the conversation. The proof is bound to the source and
-destination threads, destination turn, chain, and Relay sequence.
+Desktop success requires the declared host dependency
+`RELAY_DESKTOP_PRESENTATION_COMMAND`: the current Codex app-server has no
+supported Desktop focus/select request. The bridge must open/select the exact
+`codex://threads/<thread-id>` destination, verify that exact selection, and
+write proof before Relay acknowledges the source. A persisted thread,
+`thread/read`, or `thread/loaded/list` is not proof that the Desktop window
+selected the conversation. The proof is bound to the source and destination
+threads, destination turn, chain, and Relay sequence.
 
 ## Telemetry
 
