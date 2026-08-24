@@ -101,11 +101,16 @@ class AppServerClient:
         thread_id: str,
         *,
         handoff_state_path: Path | None = None,
-    ) -> None:
-        """Wait until Goal Mode terminates or hands off to another Relay thread."""
+    ) -> bool:
+        """Wait until Goal Mode terminates or the destination hands off again."""
 
         deadline = time.monotonic() + self._turn_timeout
         while True:
+            if handoff_state_path is not None and _handoff_acknowledged(
+                handoff_state_path,
+                source_thread_id=thread_id,
+            ):
+                return True
             result = self.request("thread/goal/get", {"threadId": thread_id})
             goal = result.get("goal")
             if not isinstance(goal, dict):
@@ -116,16 +121,12 @@ class AppServerClient:
             self._raise_for_failed_turn()
             status = goal.get("status")
             if status in {"complete", "blocked"}:
-                return
+                return False
             if status != "active":
                 raise AppServerFailure(
                     code="invalid_goal_status",
                     detail=f"destination Goal has unexpected status {status}",
                 )
-            if handoff_state_path is not None and _handoff_acknowledged(
-                handoff_state_path
-            ):
-                return
             if time.monotonic() >= deadline:
                 raise AppServerFailure(
                     code="protocol_timeout",
@@ -265,7 +266,7 @@ class AppServerClient:
         return True
 
 
-def _handoff_acknowledged(path: Path) -> bool:
+def _handoff_acknowledged(path: Path, *, source_thread_id: str) -> bool:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError):
@@ -273,6 +274,8 @@ def _handoff_acknowledged(path: Path) -> bool:
     return bool(
         isinstance(value, dict)
         and value.get("status") == "running"
+        and value.get("source_session_id") == source_thread_id
         and isinstance(value.get("destination_thread_id"), str)
         and value["destination_thread_id"]
+        and value["destination_thread_id"] != source_thread_id
     )

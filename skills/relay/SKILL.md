@@ -18,12 +18,15 @@ When current occupancy reaches the threshold, Relay:
    progress/decisions/constraints/validation, live changed-file hint,
    repository path, and next action.
 3. Starts `codex app-server --stdio`, calls `thread/start` with the same
-   repository `cwd` and directly exposed thread settings, restores and verifies
-   the Goal with `thread/goal/set`, then calls `turn/start` before acknowledging
-   the handoff.
+   repository `cwd` and directly exposed thread settings, names the destination
+   `Relay II: <original title>` (or the next deterministic sequence), restores
+   and verifies the Goal with `thread/goal/set`, then calls `turn/start`.
 4. Returns the destination thread and turn IDs only after the fresh destination
-   exists. The source prompt is blocked and source tool calls are denied after
-   that point, so the source becomes quiescent through the supported hook API.
+   exists and any required presentation proof has arrived. Goal-control,
+   cancellation, and shutdown paths bypass quiescence; `SessionEnd` cleans
+   detached workers.
+   Ordinary repeated no-progress observations stop at the circuit-breaker
+   limit instead of creating an unbounded chain.
 
 The production path never calls `thread/fork`. A fork retains completed history;
 Relay needs a genuinely fresh context. The destination receives the same plugin
@@ -44,12 +47,22 @@ Each source thread gets one small atomic record under:
 ```
 
 It contains the source and destination IDs, repository path, Goal objective,
-threshold observation, changed-file hint, and next action. A sibling lock file
-serializes duplicate hooks. There is no transcript copy, revision chain,
-distributed journal, manual seed, or persistent handoff document. Goal/settings
-read failures and pre-ack launch failures fail open. A worker outcome record
-detects destination failure after acknowledgement so the next eligible source
-hook can retry instead of remaining permanently quiesced.
+threshold observation, changed-file hint, next action, stable chain ID, Relay
+sequence, original title, progress fingerprint, and presentation status. A
+sibling lock file serializes duplicate hooks. Goal/settings read failures and
+pre-ack launch or presentation failures fail open. The worker writes a completed
+outcome and closes its app-server when the destination Goal becomes terminal or
+the destination acknowledges its own successor; `SessionEnd` remains a fallback
+that kills detached worker process groups and persists cancellation outcomes.
+
+Desktop success requires the declared host dependency
+`RELAY_DESKTOP_PRESENTATION_COMMAND`: the current Codex app-server has no
+supported Desktop focus/select request. The bridge must open/select the exact
+`codex://threads/<thread-id>` destination, verify that exact selection, and
+write proof before Relay acknowledges the source. A persisted thread,
+`thread/read`, or `thread/loaded/list` is not proof that the Desktop window
+selected the conversation. The proof is bound to the source and destination
+threads, destination turn, chain, and Relay sequence.
 
 ## Telemetry
 

@@ -21,6 +21,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh SessionEnd",
+            "statusMessage": "Cleaning Relay workers"
+          }
+        ]
+      }
     ]
   }
 }

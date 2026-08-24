@@ -16,6 +16,9 @@ case "$EVENT" in
   PreToolUse|pre-tool-use)
     OFFICIAL_EVENT="PreToolUse"
     ;;
+  SessionEnd|session-end)
+    OFFICIAL_EVENT="SessionEnd"
+    ;;
   *)
     printf '%s\n' '{"continue":true}'
     exit 0
@@ -23,7 +26,7 @@ case "$EVENT" in
 esac
 
 if [[ ! -f "$SCRIPT" ]] || ! command -v python3 >/dev/null 2>&1; then
-  if [[ "$OFFICIAL_EVENT" == "PreToolUse" ]]; then
+  if [[ "$OFFICIAL_EVENT" == "PreToolUse" || "$OFFICIAL_EVENT" == "SessionEnd" ]]; then
     printf '%s\n' '{}'
   else
     printf '%s\n' '{"continue":true}'
@@ -43,7 +46,7 @@ set -e
 
 if [[ $STATUS -eq 0 && "$OUTPUT" == \{* ]]; then
   printf '%s\n' "$OUTPUT"
-elif [[ "$OFFICIAL_EVENT" == "PreToolUse" ]]; then
+elif [[ "$OFFICIAL_EVENT" == "PreToolUse" || "$OFFICIAL_EVENT" == "SessionEnd" ]]; then
   printf '%s\n' '{}'
 else
   printf '%s\n' '{"continue":true}'

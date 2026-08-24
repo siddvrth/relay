@@ -13,8 +13,14 @@ are not exposed by the hook payload, so Relay does not claim to preserve them.
 It only relays an active Goal; unavailable Goal or settings reads fail open for
 a later retry.
 
-The source thread is quiesced through the supported hook responses: its next
-prompt is blocked and its tool calls are denied after the destination is real.
+The source thread is quiesced through the supported hook responses only after
+the destination is acknowledged. Goal-control, cancel, stop, and shutdown
+operations bypass Relay's quiescence decision. `SessionEnd` cleans Relay worker
+process groups; repeated unchanged progress trips a circuit breaker instead of
+creating an unbounded chain.
+
+Destinations are named `Relay II: <original title>`, `Relay III: <original
+title>`, and so on. Each state record carries one stable chain ID and sequence.
 The destination is created with `thread/start`, never `thread/fork`, so it does
 not inherit the predecessor conversation.
 
@@ -52,8 +58,22 @@ record exposed by `transcript_path`. Direct `thread/tokenUsage/updated`
 notifications are accepted only by the parser's diagnostic/test surface.
 Unknown or missing telemetry fails open. One small atomic JSON record plus a
 worker outcome record per source thread provide duplicate suppression and
-post-launch recovery; no transcript is copied and no manual state seed is
-required.
+destination lifecycle completion; no transcript is copied and no manual state
+seed is required. Runtime state also records the chain ID, sequence, original
+title, progress fingerprint, and presentation status.
+
+For a Desktop handoff, set `RELAY_DESKTOP_HANDOFF=1` and provide
+`RELAY_DESKTOP_PRESENTATION_COMMAND`. This is a host dependency: the current
+Codex app-server exposes no supported Desktop focus/select request, so Relay
+does not claim automatic Desktop visibility in a normal install without it.
+The bridge receives a JSON request on stdin, opens/selects the exact
+`codex://threads/<thread-id>` destination through a supported host mechanism,
+verifies the exact selected destination, and writes `RELAY_DESKTOP_ACK_PATH`
+containing `presented: true`, the exact `selected_thread_id`, `thread_id`,
+`turn_id`, `source_thread_id`, `chain_id`, and `relay_sequence`. Without that
+proof the handoff fails open and the source remains usable. Persistence,
+`thread/read`, or `thread/loaded/list` alone are not Desktop visibility
+evidence.
 
 `/compact` keeps the same thread and summarizes earlier conversation. Relay
 adds fresh-thread startup overhead in exchange for a new context window and a
