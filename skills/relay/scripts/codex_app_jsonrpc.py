@@ -106,6 +106,10 @@ class AppServerClient:
 
         deadline = time.monotonic() + self._turn_timeout
         while True:
+            if handoff_state_path is not None and _handoff_acknowledged(
+                handoff_state_path
+            ):
+                return
             result = self.request("thread/goal/get", {"threadId": thread_id})
             goal = result.get("goal")
             if not isinstance(goal, dict):
@@ -122,10 +126,6 @@ class AppServerClient:
                     code="invalid_goal_status",
                     detail=f"destination Goal has unexpected status {status}",
                 )
-            if handoff_state_path is not None and _handoff_acknowledged(
-                handoff_state_path
-            ):
-                return
             if time.monotonic() >= deadline:
                 raise AppServerFailure(
                     code="protocol_timeout",

@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 import relay
+from codex_app_jsonrpc import AppServerClient
 
 
 FAKE_CODEX = textwrap.dedent(
@@ -747,6 +748,31 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(response, {"continue": True})
         stop.assert_called_once_with(4646, repo=self.repo.resolve())
         self.assertEqual(self.state("failed-cleanup")["status"], "failed")
+
+    def test_acknowledged_handoff_short_circuits_goal_polling(self) -> None:
+        handoff_state = self.root / "handoff-state.json"
+        handoff_state.write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "destination_thread_id": "destination-C",
+                }
+            ),
+            encoding="utf-8",
+        )
+        client = AppServerClient.__new__(AppServerClient)
+        client._turn_timeout = 1.0
+        with mock.patch.object(
+            AppServerClient,
+            "request",
+            side_effect=AssertionError("goal polling should not precede handoff check"),
+        ) as request:
+            AppServerClient.wait_for_goal_terminal(
+                client,
+                "source-B",
+                handoff_state_path=handoff_state,
+            )
+        request.assert_not_called()
 
     def test_circuit_breaker_blocks_before_cleaning_other_chain_workers(self) -> None:
         events: list[str] = []
