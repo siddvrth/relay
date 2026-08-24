@@ -63,6 +63,10 @@ def main() -> int:
         for variable in (
             "OMO_CODEX_HOOKS_DISABLED",
             "CODEX_HOOKS_DISABLED",
+            "CODEX_SESSION_ID",
+            "CODEX_THREAD_ID",
+            "CODEX_CI",
+            "CODEX_SHELL",
             "RELAY_DESKTOP_HANDOFF",
         ):
             environment.pop(variable, None)
