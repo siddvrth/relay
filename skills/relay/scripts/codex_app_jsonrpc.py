@@ -100,8 +100,9 @@ class AppServerClient:
         self,
         thread_id: str,
         *,
+        turn_id: str,
         handoff_state_path: Path | None = None,
-    ) -> None:
+    ) -> bool:
         """Wait until Goal Mode terminates or hands off to another Relay thread."""
 
         deadline = time.monotonic() + self._turn_timeout
@@ -109,7 +110,18 @@ class AppServerClient:
             if handoff_state_path is not None and _handoff_acknowledged(
                 handoff_state_path
             ):
-                return
+                try:
+                    self.request(
+                        "turn/interrupt",
+                        {"threadId": thread_id, "turnId": turn_id},
+                    )
+                except AppServerFailure:
+                    # The turn may already have stopped between the durable
+                    # handoff acknowledgement and this interrupt request.
+                    # The caller will close the worker-owned app-server
+                    # connection immediately after this return.
+                    pass
+                return True
             result = self.request("thread/goal/get", {"threadId": thread_id})
             goal = result.get("goal")
             if not isinstance(goal, dict):
@@ -120,7 +132,7 @@ class AppServerClient:
             self._raise_for_failed_turn()
             status = goal.get("status")
             if status in {"complete", "blocked"}:
-                return
+                return False
             if status != "active":
                 raise AppServerFailure(
                     code="invalid_goal_status",

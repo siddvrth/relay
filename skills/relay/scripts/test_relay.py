@@ -765,14 +765,19 @@ class RelayTests(unittest.TestCase):
         with mock.patch.object(
             AppServerClient,
             "request",
-            side_effect=AssertionError("goal polling should not precede handoff check"),
+            return_value={},
         ) as request:
-            AppServerClient.wait_for_goal_terminal(
+            handed_off = AppServerClient.wait_for_goal_terminal(
                 client,
                 "source-B",
+                turn_id="turn-B",
                 handoff_state_path=handoff_state,
             )
-        request.assert_not_called()
+        self.assertTrue(handed_off)
+        request.assert_called_once_with(
+            "turn/interrupt",
+            {"threadId": "source-B", "turnId": "turn-B"},
+        )
 
     def test_circuit_breaker_blocks_before_cleaning_other_chain_workers(self) -> None:
         events: list[str] = []

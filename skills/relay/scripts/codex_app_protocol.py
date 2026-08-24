@@ -265,13 +265,21 @@ def start_protocol(
             if on_acknowledged is not None:
                 on_acknowledged(acknowledgement)
 
+            handed_off = False
             if config.goal_objective:
-                client.wait_for_goal_terminal(
+                handed_off = client.wait_for_goal_terminal(
                     thread_id,
+                    turn_id=turn_id,
                     handoff_state_path=_relay_state_path(config.cwd, thread_id),
                 )
             else:
                 client.wait_for_completion(turn_id)
+            if handed_off:
+                return ProtocolCompletion(
+                    acknowledgement=acknowledgement,
+                    destination_readable=True,
+                    presentation_verified=presentation.verified,
+                )
             read_result = client.request(
                 "thread/read",
                 {
