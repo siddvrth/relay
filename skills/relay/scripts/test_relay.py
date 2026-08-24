@@ -25,6 +25,7 @@ FAKE_CODEX = textwrap.dedent(
     import os
     import pathlib
     import sys
+    import time
 
     log_path = pathlib.Path(os.environ["FAKE_CODEX_LOG"])
     thread_id = None
@@ -111,6 +112,9 @@ FAKE_CODEX = textwrap.dedent(
                     "threadId": thread_id, "turnId": turn_id, "itemId": "file-change-1"
                 }})
             else:
+                delay = float(os.environ.get("FAKE_CODEX_TURN_DELAY", "0"))
+                if delay > 0:
+                    time.sleep(delay)
                 send({"method": "turn/completed", "params": {"turn": {"id": turn_id, "status": "completed"}}})
         elif method == "thread/read":
             send({"id": request_id, "result": {"thread": {
@@ -1039,7 +1043,11 @@ class RelayTests(unittest.TestCase):
         self.assertIn("targeted tests currently pass", prompt)
 
     def test_duplicate_concurrent_events_create_one_destination(self) -> None:
-        with self.env(), ThreadPoolExecutor(max_workers=2) as executor:
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"FAKE_CODEX_TURN_DELAY": "0.5"},
+            clear=False,
+        ), ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(self.call, "race", ratio=0.31) for _ in range(2)]
             responses = [future.result(timeout=10) for future in futures]
         self.assertTrue(all(response.get("decision") == "block" for response in responses))
