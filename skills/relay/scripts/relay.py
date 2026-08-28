@@ -526,17 +526,31 @@ def handle_hook(
         # A hook must never stop the source because Relay could not inspect or
         # persist its small record.  The next eligible hook can retry.
         if acknowledged_worker_pid is not None:
-            stop_worker_pid(acknowledged_worker_pid, repo=repo)
+            outcome_path = state_path.with_suffix(".outcome.json")
+            stopped = stop_worker_pid(acknowledged_worker_pid, repo=repo)
+            if not stopped:
+                stopped = stop_worker_group(
+                    acknowledged_worker_pid,
+                    repo=repo,
+                    outcome_path=outcome_path,
+                )
             try:
-                _write_state(
-                    state_path,
+                failed_state = _read_state(state_path) or {}
+                failed_state.update(
                     {
-                        "status": "failed",
+                        "status": "failed" if stopped else "cleanup_failed",
                         "source_session_id": session_id,
                         "cwd": str(repo),
-                        "error": "post-ack Relay persistence failed; destination worker stopped",
+                        "worker_pid": acknowledged_worker_pid,
+                        "outcome_path": str(outcome_path),
+                        "error": "post-ack Relay persistence failed; destination worker cleanup attempted",
+                        "cleanup": "worker_terminated" if stopped else "worker_still_live",
                         "updated_at": _timestamp(),
-                    },
+                    }
+                )
+                _write_state(
+                    state_path,
+                    failed_state,
                 )
             except OSError:
                 pass

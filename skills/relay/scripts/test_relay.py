@@ -746,6 +746,42 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(state["status"], "failed")
         self.assertIn("post-ack Relay persistence failed", state["error"])
 
+    def test_post_ack_persistence_failure_falls_back_to_group_cleanup(self) -> None:
+        real_write = relay._write_state
+
+        def fail_running_state(path: Path, payload: dict[str, object]) -> None:
+            if payload.get("status") == "running" and "destination_thread_id" in payload:
+                raise OSError("simulated state persistence failure")
+            real_write(path, payload)
+
+        with self.env(), mock.patch.object(
+            relay,
+            "launch",
+            return_value=codex_app_transport.LaunchResult(
+                True,
+                "destination",
+                "turn-destination",
+                worker_pid=2345,
+            ),
+        ), mock.patch.object(relay, "stop_worker_pid", return_value=False) as stop, mock.patch.object(
+            relay,
+            "stop_worker_group",
+            return_value=True,
+        ) as group, mock.patch.object(relay, "_write_state", side_effect=fail_running_state):
+            response = self.call("persist-group-fallback")
+        self.assertEqual(response, {"continue": True})
+        stop.assert_called_once_with(2345, repo=self.repo.resolve())
+        state_path, _ = relay._state_paths(self.repo.resolve(), "persist-group-fallback")
+        group.assert_called_once_with(
+            2345,
+            repo=self.repo.resolve(),
+            outcome_path=state_path.with_suffix(".outcome.json"),
+        )
+        state = self.state("persist-group-fallback")
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["worker_pid"], 2345)
+        self.assertIn("post-ack Relay persistence failed", state["error"])
+
     def test_foreign_live_worker_state_fails_open_without_quiescing(self) -> None:
         foreign = subprocess.Popen(["sleep", "5"])
         try:
