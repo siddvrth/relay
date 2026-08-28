@@ -555,11 +555,23 @@ def handle_hook(
                         repo=repo,
                         outcome_path=outcome_path,
                     )
+                outcome = _read_state(outcome_path)
+                completed = (
+                    outcome is not None
+                    and outcome.get("status") == "completed"
+                    and outcome.get("worker_pid") == acknowledged_worker_pid
+                    and outcome.get("thread_id") == acknowledged_destination_thread_id
+                    and outcome.get("turn_id") == acknowledged_destination_turn_id
+                )
                 fallback_state = dict(acknowledged_state)
                 fallback_state.update(
                     {
-                        "status": "failed" if stopped else "cleanup_failed",
-                        "cleanup": "worker_terminated" if stopped else "worker_still_live",
+                        "status": "running" if completed else ("failed" if stopped else "cleanup_failed"),
+                        "cleanup": (
+                            "destination_completed"
+                            if completed
+                            else ("worker_terminated" if stopped else "worker_still_live")
+                        ),
                         "updated_at": _timestamp(),
                     }
                 )

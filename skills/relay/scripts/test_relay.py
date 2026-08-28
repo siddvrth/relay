@@ -818,7 +818,7 @@ class RelayTests(unittest.TestCase):
         ) as launch_mock, mock.patch.object(
             relay,
             "stop_worker_pid",
-            return_value=False,
+            return_value=True,
         ), mock.patch.object(relay, "stop_worker_group", return_value=False), mock.patch.object(
             relay,
             "_write_state",
