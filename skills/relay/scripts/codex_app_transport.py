@@ -337,7 +337,7 @@ def stop_worker_pid(
 
 
 def worker_pid_is_relay(pid: int, *, repo: Path) -> bool:
-    return pid > 0 and _is_relay_worker(pid, repo) and _pid_exists(pid)
+    return pid > 0 and _is_relay_worker(pid, repo)
 
 
 def _is_relay_worker(pid: int, repo: Path | None) -> bool:
@@ -353,7 +353,9 @@ def _is_relay_worker(pid: int, repo: Path | None) -> bool:
     command = result.stdout.strip()
     if "codex_app_transport.py" not in command or "--worker-request" not in command:
         return False
-    return repo is None or str(repo.resolve()) in command
+    if repo is None:
+        return True
+    return any(candidate in command for candidate in {str(repo), str(repo.resolve())})
 
 
 def _pid_exists(pid: int) -> bool:
