@@ -46,6 +46,32 @@ CLI/exec and explicitly app-server-created threads are headless paths. Other
 host surfaces remain native-compaction-only until Codex exposes a supported
 presentation acknowledgement.
 
+## Compatibility
+
+Relay requires Python 3.10 or newer. The hook checks the interpreter before it
+runs and reports an actionable diagnostic before failing open if no supported
+interpreter is available. Set `RELAY_PYTHON` to the path of a supported Python
+executable when `python3` is not the right interpreter.
+
+The v0.6.0 release checks used Codex CLI 0.149.1 for clean plugin installation
+and hook-contract validation. CLI/exec and explicitly app-server-created
+threads are the supported headless paths. Codex Desktop is not supported in
+this release: its current `vscode` source fails open to native compaction
+because Relay has no supported presentation acknowledgement. Other Codex
+versions are unverified.
+
+## Local state and deletion
+
+Relay keeps bounded, local handoff metadata under `.omx/state/relay/`, including
+Goal and repository identifiers, chain/status/progress data, and worker
+outcomes. It does not store full transcripts. The directory is ignored by Git,
+is not automatically expired, and should be treated as sensitive while it is
+present.
+
+To clear a repository's Relay state, first stop any Relay worker, then move
+`.omx/state/relay/` to your operating system's Trash (on macOS, use Finder or
+the `trash` utility). A later handoff starts without the removed local record.
+
 ## Install and verify
 
 This checkout does not advertise a fabricated marketplace selector. Install
@@ -64,6 +90,9 @@ in B, Goal/settings preservation, worker cleanup, and duplicate suppression:
 ```bash
 python3 skills/relay/scripts/smoke_codex_app_transport.py
 ```
+
+The smoke defaults to `gpt-5.6-luna`; set `RELAY_SMOKE_MODEL` to a model
+available to your Codex account when running it locally.
 
 Relay uses only Python's standard library and Bash. Its release policy remains
 `experimental_non_claim`: it makes no token-efficiency, cost-savings, or

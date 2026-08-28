@@ -29,7 +29,7 @@ GOAL = (
     "continuation reports RELAY_SMOKE_B_WORK_DONE, use no workspace tools, reply "
     "RELAY_SMOKE_C_ACK, and leave the Goal active for harness-controlled completion."
 )
-MODEL = "gpt-5.6-luna"
+DEFAULT_MODEL = "gpt-5.6-luna"
 EFFORT = "low"
 LOW_LIMIT_ARGS = (
     "-c",
@@ -43,6 +43,10 @@ LOW_LIMIT_ARGS = (
 
 def _approval_policy() -> str:
     return os.environ.get("RELAY_SMOKE_APPROVAL_POLICY", "on-request")
+
+
+def _smoke_model() -> str:
+    return os.environ.get("RELAY_SMOKE_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
 def main() -> int:
@@ -142,7 +146,7 @@ def _exec_seed(
             "--thread-source",
             "cli",
             "--model",
-            MODEL,
+            _smoke_model(),
             "--sandbox",
             "workspace-write",
             "-c",
@@ -341,7 +345,7 @@ def _run_chain(
 def _settings(repo: Path) -> dict[str, object]:
     return {
         "cwd": str(repo),
-        "model": MODEL,
+        "model": _smoke_model(),
         "effort": EFFORT,
         "personality": "pragmatic",
         "approvalPolicy": _approval_policy(),
@@ -354,7 +358,7 @@ def _settings(repo: Path) -> dict[str, object]:
         "collaborationMode": {
             "mode": "default",
             "settings": {
-                "model": MODEL,
+                "model": _smoke_model(),
                 "reasoning_effort": EFFORT,
                 "developer_instructions": None,
             },
@@ -1073,7 +1077,7 @@ def _probe_packaged_manual_native(
             "thread/start",
             {
                 "cwd": str(repo),
-                "model": MODEL,
+                "model": _smoke_model(),
                 "approvalPolicy": "never",
                 "sandbox": "workspace-write",
                 "threadSource": "cli",

@@ -2,6 +2,9 @@
 
 ## 0.6.0 - 2026-08-27
 
+- Added explicit Python 3.10+ hook detection with an actionable fail-open diagnostic,
+  documented the validated Codex surface and local-state removal, and made the
+  real smoke model configurable.
 - Replaced token-threshold triggering with the supported auto-only `PreCompact` boundary.
 - Stopped source compaction only after a fresh destination Goal and explicit turn are verified; failures now defer to native compaction.
 - Preserved manual `/compact` and converted prompt/tool hooks to post-handoff ownership guards.

@@ -1,6 +1,9 @@
 # Security
 
 Relay writes one local continuation record per source thread. Treat it as sensitive until removed.
+Relay does not automatically expire these records. Stop any Relay worker before
+moving the repository's `.omx/state/relay/` directory to the operating system's
+Trash when you want to remove the local handoff state.
 
 ## Supported Surface
 

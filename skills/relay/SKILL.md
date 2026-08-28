@@ -47,6 +47,22 @@ before `thread/start`. CLI/exec and app-server-created threads are headless
 paths; current Desktop (`source: vscode`) is not. This is not supported Desktop
 presentation.
 
+## Compatibility and state
+
+Relay requires Python 3.10 or newer. The hook checks the interpreter and emits
+an actionable diagnostic before failing open when no supported interpreter is
+available; set `RELAY_PYTHON` when `python3` is not the intended executable.
+
+The v0.6.0 release checks used Codex CLI 0.149.1 for clean installation and
+hook-contract validation. Other Codex versions are unverified, and Desktop
+presentation is unsupported as described above.
+
+Relay stores bounded local handoff metadata and worker outcomes under
+`.omx/state/relay/`; it does not store full transcripts. The directory is
+ignored by Git, is not automatically expired, and should be treated as
+sensitive. Stop Relay workers before moving that directory to the operating
+system's Trash when you want to delete the local record.
+
 ## Verify
 
 ```bash
@@ -55,5 +71,7 @@ bash validate.sh
 ```
 
 Use `python3 skills/relay/scripts/smoke_codex_app_transport.py` for the
-authenticated, isolated-home A → B → C smoke. Review and trust installed hook
-definitions; plugin installation alone does not authorize them.
+authenticated, isolated-home A → B → C smoke. It defaults to
+`gpt-5.6-luna`; set `RELAY_SMOKE_MODEL` to a model available to your account.
+Review and trust installed hook definitions; plugin installation alone does
+not authorize them.
