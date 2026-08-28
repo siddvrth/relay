@@ -145,20 +145,28 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
     acknowledged = False
     acknowledgement_result: ProtocolAcknowledgement | None = None
     outcome_path: Path | None = None
+    worker_metadata: dict[str, object] = {
+        "worker_pid": os.getpid(),
+        "worker_pgid": os.getpid(),
+        "request_path": str(request_path),
+    }
     with os.fdopen(ack_fd, "w", encoding="utf-8") as acknowledgement:
         try:
             payload = json.loads(request_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                worker_metadata.update(
+                    {
+                        "cwd": payload.get("cwd"),
+                        "codex_binary": payload.get("codex_binary"),
+                    }
+                )
             if isinstance(payload, dict) and isinstance(payload.get("outcome_path"), str):
                 outcome_path = Path(payload["outcome_path"])
                 _write_outcome(
                     outcome_path,
                     {
                         "status": "running",
-                        "worker_pid": os.getpid(),
-                        "worker_pgid": os.getpid(),
-                        "cwd": payload.get("cwd") if isinstance(payload, dict) else None,
-                        "codex_binary": payload.get("codex_binary") if isinstance(payload, dict) else None,
-                        "request_path": str(request_path),
+                        **worker_metadata,
                     },
                 )
             config = _config_from_json(payload)
@@ -190,7 +198,7 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
                     outcome_path,
                     {
                         "status": "completed",
-                        "worker_pid": os.getpid(),
+                        **worker_metadata,
                         "thread_id": completion.acknowledgement.thread_id,
                         "turn_id": completion.acknowledgement.turn_id,
                     },
@@ -199,6 +207,7 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
         except Exception as error:  # The source hook fails open on this path.
             if outcome_path is not None:
                 failed: dict[str, object] = {
+                    **worker_metadata,
                     "status": "failed",
                     "error": str(error),
                 }
