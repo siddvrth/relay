@@ -1071,6 +1071,45 @@ class RelayTests(unittest.TestCase):
                 except ProcessLookupError:
                     pass
 
+    def test_pre_ack_leader_exit_kills_orphaned_app_server(self) -> None:
+        fake_server = self.root / "preack-codex"
+        child_pid_path = self.root / "preack-child.pid"
+        fake_server.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "import pathlib\n"
+            "import signal\n"
+            "import time\n"
+            "pathlib.Path(os.environ['PREACK_CHILD_PID']).write_text(str(os.getpid()), encoding='utf-8')\n"
+            "os.kill(os.getppid(), signal.SIGKILL)\n"
+            "time.sleep(60)\n",
+            encoding="utf-8",
+        )
+        fake_server.chmod(fake_server.stat().st_mode | stat.S_IXUSR)
+        outcome_path = self.repo / ".omx/state/relay/preack.outcome.json"
+        config = codex_app_transport.LaunchConfig(
+            cwd=self.repo.resolve(),
+            continuation_prompt="continue",
+            codex_binary=fake_server.resolve(),
+            outcome_path=outcome_path,
+            response_timeout=2,
+            turn_timeout=2,
+        )
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"PREACK_CHILD_PID": str(child_pid_path)},
+            clear=False,
+        ):
+            result = codex_app_transport.launch(config, acknowledgement_timeout=2)
+        self.assertFalse(result.acknowledged)
+        self.assertIn("worker_closed_acknowledgement", result.error or "")
+        child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and relay._pid_is_alive(child_pid):
+            time.sleep(0.02)
+        self.assertFalse(relay._pid_is_alive(child_pid))
+        relay._write_state(outcome_path, {"status": "cancelled", "worker_pid": result.worker_pid})
+
     def test_failed_handoff_cleanup_stops_recorded_worker_before_retry(self) -> None:
         state_path, _ = relay._state_paths(self.repo, "failed-cleanup")
         outcome_path = state_path.with_suffix(".outcome.json")

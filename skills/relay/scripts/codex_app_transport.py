@@ -310,15 +310,9 @@ def _write_outcome(path: Path, payload: dict[str, object]) -> None:
 
 
 def _stop_worker(worker: subprocess.Popen[bytes]) -> None:
-    if worker.poll() is not None:
+    if worker.poll() is not None and not _process_group_exists(worker.pid):
         return
-    try:
-        os.killpg(worker.pid, signal.SIGTERM)
-        worker.wait(timeout=5)
-    except (ProcessLookupError, subprocess.TimeoutExpired):
-        if worker.poll() is None:
-            os.killpg(worker.pid, signal.SIGKILL)
-            worker.wait(timeout=5)
+    _terminate_process_group(worker.pid, timeout=5)
 
 
 def stop_worker_pid(
@@ -502,7 +496,8 @@ def _reap_worker(worker: subprocess.Popen[bytes]) -> None:
     try:
         worker.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        _stop_worker(worker)
+        pass
+    _stop_worker(worker)
 
 
 def main() -> int:
