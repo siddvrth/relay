@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 - 2026-08-27
+
+- Replaced token-threshold triggering with the supported auto-only `PreCompact` boundary.
+- Stopped source compaction only after a fresh destination Goal and explicit turn are verified; failures now defer to native compaction.
+- Preserved manual `/compact` and converted prompt/tool hooks to post-handoff ownership guards.
+- Removed token telemetry and the unsupported Desktop presenter/deep-link bridge; Desktop now fails open without creating an invisible successor.
+- Restored Goals paused before the explicit continuation turn, then reactivated them to avoid racing host-owned Goal continuation.
+- Corrected named permission-profile preservation, stale-state validation, and circuit-breaker behavior so Relay never blocks the Goal.
+
 ## 0.5.0 - 2026-08-23
 
 - Fixed worker completion after a destination acknowledges its successor, without completing the predecessor Goal or interrupting its turn.

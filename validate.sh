@@ -38,7 +38,6 @@ for python_runtime in "${PYTHONS[@]}"; do
 done
 
 python3 "$PKG/scripts/validate_distribution.py"
-python3 "$SKILL/test_context_usage.py" -q
 python3 "$SKILL/test_relay.py" -q
 bash -n "$PKG/hooks/relay_hook.sh"
 
@@ -83,9 +82,9 @@ PY
   test -f "$installed_path/skills/relay/scripts/relay.py"
   mkdir -p "$SMOKE_REPO"
   git init -q "$SMOKE_REPO"
-  installed_hook="$(cd "$SMOKE_REPO" && RELAY_CODEX_APP_TRANSPORT=disabled PLUGIN_ROOT="$installed_path" ROOT="$SMOKE_REPO" bash "$installed_path/hooks/relay_hook.sh" UserPromptSubmit <<< '{"session_id":"install-smoke"}')"
+  installed_hook="$(cd "$SMOKE_REPO" && RELAY_CODEX_APP_TRANSPORT=disabled PLUGIN_ROOT="$installed_path" ROOT="$SMOKE_REPO" bash "$installed_path/hooks/relay_hook.sh" PreCompact <<< '{"session_id":"install-smoke","trigger":"auto"}')"
   python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == {"continue": True}' "$installed_hook"
-  echo "clean Codex plugin install: OK"
+  echo "clean Codex plugin install with PreCompact hook: OK"
 else
   echo "clean Codex plugin install: SKIPPED (codex binary not found)"
 fi

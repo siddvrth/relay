@@ -88,6 +88,7 @@ class AppServerClient:
         for message in pending:
             if self._is_completed_turn(message, turn_id):
                 return
+            self._notifications.append(message)
         deadline = time.monotonic() + self._turn_timeout
         while True:
             message = self._read(deadline, "turn/completed")
@@ -95,6 +96,26 @@ class AppServerClient:
                 continue
             if self._is_completed_turn(message, turn_id):
                 return
+
+    def wait_for_started(self, turn_id: str) -> None:
+        pending = self._notifications
+        self._notifications = []
+        for message in pending:
+            if self._is_started_turn(message, turn_id):
+                return
+            self._notifications.append(message)
+        deadline = time.monotonic() + self._response_timeout
+        while True:
+            message = self._read(deadline, "turn/started")
+            if self._route(message):
+                continue
+            if self._is_started_turn(message, turn_id):
+                return
+            if self._is_completed_turn(message, turn_id):
+                raise AppServerFailure(
+                    code="turn_failed",
+                    detail="destination turn completed before turn/started was observed",
+                )
 
     def wait_for_goal_terminal(
         self,
@@ -248,6 +269,14 @@ class AppServerClient:
         return message
 
     @staticmethod
+    def _is_started_turn(message: JsonObject, turn_id: str) -> bool:
+        if message.get("method") != "turn/started":
+            return False
+        params = message.get("params")
+        turn = params.get("turn") if isinstance(params, dict) else None
+        return isinstance(turn, dict) and turn.get("id") == turn_id
+
+    @staticmethod
     def _is_completed_turn(message: JsonObject, turn_id: str) -> bool:
         if message.get("method") != "turn/completed":
             return False
@@ -271,11 +300,37 @@ def _handoff_acknowledged(path: Path, *, source_thread_id: str) -> bool:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         return False
+    if not isinstance(value, dict) or value.get("status") != "running":
+        return False
+    destination = value.get("destination_thread_id")
+    source_sequence = value.get("relay_sequence")
+    destination_sequence = value.get("destination_relay_sequence")
+    outcome_path = value.get("outcome_path")
+    try:
+        outcome = json.loads(Path(outcome_path).read_text(encoding="utf-8"))
+    except (TypeError, OSError, json.JSONDecodeError):
+        return False
     return bool(
-        isinstance(value, dict)
-        and value.get("status") == "running"
-        and value.get("source_session_id") == source_thread_id
-        and isinstance(value.get("destination_thread_id"), str)
-        and value["destination_thread_id"]
-        and value["destination_thread_id"] != source_thread_id
+        value.get("source_session_id") == source_thread_id
+        and isinstance(destination, str)
+        and destination
+        and destination != source_thread_id
+        and isinstance(value.get("destination_turn_id"), str)
+        and value["destination_turn_id"]
+        and isinstance(value.get("relay_chain_id"), str)
+        and value["relay_chain_id"]
+        and type(source_sequence) is int
+        and destination_sequence == source_sequence + 1
+        and type(value.get("worker_pid")) is int
+        and value["worker_pid"] > 0
+        and isinstance(value.get("outcome_path"), str)
+        and isinstance(outcome, dict)
+        and outcome.get("status") in {"running", "completed"}
+        and (
+            outcome.get("status") == "running"
+            or (
+                outcome.get("thread_id") == destination
+                and outcome.get("turn_id") == value["destination_turn_id"]
+            )
+        )
     )

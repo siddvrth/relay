@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
-import shlex
 import subprocess
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,29 +16,19 @@ from codex_app_jsonrpc import AppServerClient, AppServerFailure, JsonObject
 CLIENT_INFO: Final[JsonObject] = {
     "name": "relay",
     "title": "Relay",
-    "version": "0.5.0",
+    "version": "0.6.0",
 }
 
 
 @dataclass(frozen=True, slots=True)
 class GoalSnapshot:
+    thread_id: str
     objective: str
     status: str | None
     token_budget: int | None
-    tokens_used: int | None = None
-    updated_at: int | None = None
     title: str | None = None
     preview: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class PresentationProof:
-    """Evidence that the destination was presented on the requested surface."""
-
-    mode: str
-    verified: bool
-    evidence: str
-    selected_thread_id: str | None = None
+    source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,26 +44,19 @@ class ProtocolConfig:
     goal_token_budget: int | None = None
     settings: JsonObject | None = None
     thread_name: str | None = None
-    relay_chain_id: str | None = None
-    relay_sequence: int | None = None
     source_thread_id: str | None = None
-    presentation_mode: str = "headless"
-    presentation_timeout: float = 10.0
-    presentation_ack_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ProtocolAcknowledgement:
     thread_id: str
     turn_id: str
-    presentation: PresentationProof | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ProtocolCompletion:
     acknowledgement: ProtocolAcknowledgement
     destination_readable: bool
-    presentation_verified: bool = False
 
 
 def read_thread_goal(
@@ -109,6 +89,8 @@ def read_thread_goal(
         goal = _goal_snapshot(result)
         if goal is None:
             return None
+        if goal.thread_id != thread_id:
+            return None
         try:
             thread_result = client.request(
                 "thread/read",
@@ -125,54 +107,11 @@ def read_thread_goal(
         _close_streams(process)
 
 
-def set_thread_goal_status(
-    *,
-    cwd: Path,
-    thread_id: str,
-    status: str,
-    codex_binary: Path,
-    response_timeout: float = 10.0,
-) -> GoalSnapshot:
-    """Change a Goal status through the app-server control plane."""
-
-    process = subprocess.Popen(
-        [str(codex_binary), "app-server", "--stdio"],
-        cwd=cwd,
-        env=os.environ.copy(),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        bufsize=0,
-    )
-    try:
-        client = AppServerClient(
-            process,
-            response_timeout=response_timeout,
-            turn_timeout=response_timeout,
-        )
-        client.request("initialize", _initialize_params())
-        client.notify("initialized", {})
-        result = client.request(
-            "thread/goal/set",
-            {"threadId": thread_id, "status": status},
-        )
-        goal = _goal_snapshot(result)
-        if goal is None or goal.status != status:
-            raise AppServerFailure(
-                code="goal_status_update_failed",
-                detail=f"thread/goal/set did not apply status {status!r}",
-            )
-        return goal
-    finally:
-        _stop_process(process)
-        _close_streams(process)
-
-
 def start_protocol(
     config: ProtocolConfig,
     on_acknowledged: Callable[[ProtocolAcknowledgement], None] | None = None,
 ) -> ProtocolCompletion:
-    """Create, name, present, and start one continuation turn."""
+    """Create, restore, start, and acknowledge one continuation turn."""
 
     config.stderr_path.parent.mkdir(parents=True, exist_ok=True)
     with config.stderr_path.open("a", encoding="utf-8") as stderr_handle:
@@ -218,15 +157,18 @@ def start_protocol(
                 goal_params: JsonObject = {
                     "threadId": thread_id,
                     "objective": config.goal_objective,
+                    # An active Goal auto-starts its own host continuation.
+                    # Restore it paused so Relay's bounded prompt is the one
+                    # explicit first turn.
+                    "status": "paused",
                 }
                 if config.goal_token_budget is not None:
                     goal_params["tokenBudget"] = config.goal_token_budget
-                if config.goal_status is not None:
-                    goal_params["status"] = config.goal_status
                 _require_goal(
                     client.request("thread/goal/set", goal_params),
                     config,
-                    expected_status=goal_params.get("status"),
+                    expected_thread_id=thread_id,
+                    expected_status="paused",
                 )
 
             turn_params: JsonObject = {
@@ -240,9 +182,15 @@ def start_protocol(
                 "cwd": str(config.cwd),
             }
             for key in (
+                "approvalPolicy",
+                "approvalsReviewer",
                 "collaborationMode",
                 "effort",
+                "model",
+                "permissions",
+                "personality",
                 "sandboxPolicy",
+                "serviceTier",
                 "summary",
             ):
                 value = (config.settings or {}).get(key)
@@ -250,17 +198,36 @@ def start_protocol(
                     turn_params[key] = value
             turn = client.request("turn/start", turn_params)
             turn_id = _nested_id(turn, "turn", "turn/start")
+            client.wait_for_started(turn_id)
 
-            acknowledgement = ProtocolAcknowledgement(
-                thread_id=thread_id,
-                turn_id=turn_id,
+            if config.goal_objective:
+                _require_goal(
+                    client.request(
+                        "thread/goal/set",
+                        {"threadId": thread_id, "status": config.goal_status or "active"},
+                    ),
+                    config,
+                    expected_thread_id=thread_id,
+                    expected_status=config.goal_status or "active",
+                )
+            destination_metadata = client.request(
+                "thread/read",
+                {"threadId": thread_id, "includeTurns": False},
             )
+            if not _thread_is_readable(
+                destination_metadata,
+                thread_id=thread_id,
+                cwd=config.cwd,
+                expected_name=config.thread_name,
+            ):
+                raise AppServerFailure(
+                    code="destination_unreadable",
+                    detail="thread/read did not verify the fresh destination",
+                )
 
-            presentation = _present_destination(client, config, thread_id, turn_id)
             acknowledgement = ProtocolAcknowledgement(
                 thread_id=thread_id,
                 turn_id=turn_id,
-                presentation=presentation,
             )
             if on_acknowledged is not None:
                 on_acknowledged(acknowledgement)
@@ -277,7 +244,6 @@ def start_protocol(
                 return ProtocolCompletion(
                     acknowledgement=acknowledgement,
                     destination_readable=True,
-                    presentation_verified=presentation.verified,
                 )
             read_result = client.request(
                 "thread/read",
@@ -294,7 +260,6 @@ def start_protocol(
                     cwd=config.cwd,
                     expected_name=config.thread_name,
                 ),
-                presentation_verified=presentation.verified,
             )
         finally:
             _stop_process(process)
@@ -306,28 +271,25 @@ def _goal_snapshot(result: JsonObject) -> GoalSnapshot | None:
     if not isinstance(goal, dict):
         return None
     objective = goal.get("objective")
-    if not isinstance(objective, str) or not objective.strip():
+    thread_id = goal.get("threadId")
+    if (
+        not isinstance(objective, str)
+        or not objective.strip()
+        or not isinstance(thread_id, str)
+        or not thread_id
+    ):
         return None
     status = goal.get("status")
+    if not isinstance(status, str):
+        return None
     token_budget = goal.get("tokenBudget")
-    tokens_used = goal.get("tokensUsed")
-    updated_at = goal.get("updatedAt")
     return GoalSnapshot(
+        thread_id=thread_id,
         objective=objective.strip(),
-        status=status if isinstance(status, str) else None,
+        status=status,
         token_budget=(
             token_budget
             if isinstance(token_budget, int) and not isinstance(token_budget, bool)
-            else None
-        ),
-        tokens_used=(
-            tokens_used
-            if isinstance(tokens_used, int) and not isinstance(tokens_used, bool)
-            else None
-        ),
-        updated_at=(
-            updated_at
-            if isinstance(updated_at, int) and not isinstance(updated_at, bool)
             else None
         ),
     )
@@ -339,17 +301,24 @@ def _goal_with_thread_metadata(goal: GoalSnapshot, result: JsonObject) -> GoalSn
         return goal
     title = thread.get("name")
     preview = thread.get("preview")
+    thread_source = thread.get("threadSource")
     return GoalSnapshot(
+        thread_id=goal.thread_id,
         objective=goal.objective,
         status=goal.status,
         token_budget=goal.token_budget,
-        tokens_used=goal.tokens_used,
-        updated_at=goal.updated_at,
         title=title.strip() if isinstance(title, str) and title.strip() else None,
         preview=(
             preview.strip()
             if isinstance(preview, str) and preview.strip()
             else None
+        ),
+        source=(
+            thread_source
+            if thread_source in {"cli", "exec"}
+            else "custom:relay"
+            if isinstance(thread_source, str) and thread_source.startswith("relay")
+            else _thread_source(thread.get("source"))
         ),
     )
 
@@ -358,11 +327,13 @@ def _require_goal(
     result: JsonObject,
     config: ProtocolConfig,
     *,
+    expected_thread_id: str,
     expected_status: object,
 ) -> None:
     restored = _goal_snapshot(result)
     if (
         restored is None
+        or restored.thread_id != expected_thread_id
         or restored.objective != config.goal_objective
         or restored.status != expected_status
         or restored.token_budget != config.goal_token_budget
@@ -401,221 +372,12 @@ def _thread_start_params(config: ProtocolConfig) -> JsonObject:
     return params
 
 
-def _present_destination(
-    client: AppServerClient,
-    config: ProtocolConfig,
-    thread_id: str,
-    turn_id: str,
-) -> PresentationProof:
-    mode = config.presentation_mode.strip().lower()
-    if mode in {"", "headless", "none", "cli"}:
-        return PresentationProof(
-            mode=mode or "headless",
-            verified=True,
-            evidence="presentation_not_required",
-            selected_thread_id=None,
-        )
-    if mode != "desktop":
-        raise AppServerFailure(
-            code="invalid_presentation_mode",
-            detail=f"unsupported presentation mode {config.presentation_mode!r}",
-        )
-
-    uri = f"codex://threads/{thread_id}"
-    command = os.environ.get("RELAY_DESKTOP_PRESENTATION_COMMAND")
-    if not command:
-        raise AppServerFailure(
-            code="desktop_focus_unsupported",
-            detail=(
-                "Codex app-server can create and name the destination, but it "
-                "does not expose a supported Desktop focus/select request; "
-                "configure RELAY_DESKTOP_PRESENTATION_COMMAND for a host "
-                "integration that can return an exact presentation proof"
-            ),
-        )
-
-    ack_path = config.presentation_ack_path
-    if ack_path is None:
-        configured = os.environ.get("RELAY_DESKTOP_PRESENTATION_ACK")
-        if configured:
-            ack_path = Path(configured).expanduser()
-    if ack_path is None:
-        raise AppServerFailure(
-            code="desktop_visibility_unverified",
-            detail=(
-                "Desktop was asked to open the destination, but no exact "
-                "presentation acknowledgement path was configured"
-            ),
-        )
-    # A retry can reuse the deterministic state path. A proof from an earlier
-    # attempt must never authorize the new destination, even if the bridge
-    # fails before it can write a fresh acknowledgement.
-    try:
-        ack_path.unlink(missing_ok=True)
-    except OSError as error:
-        raise AppServerFailure(
-            code="desktop_visibility_unverified",
-            detail=f"could not reset Desktop presentation acknowledgement: {error}",
-        ) from error
-    # Reset the proof before invoking the bridge. A synchronous bridge is
-    # allowed to write its proof before returning; deleting the path after the
-    # command would erase valid evidence and force a false timeout.
-    _run_presentation_command(
-        command,
-        config=config,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        uri=uri,
-        ack_path=ack_path,
-    )
-    proof = _wait_for_presentation_ack(
-        ack_path,
-        thread_id=thread_id,
-        turn_id=turn_id,
-        chain_id=config.relay_chain_id,
-        sequence=config.relay_sequence,
-        source_thread_id=config.source_thread_id,
-        thread_name=config.thread_name,
-        timeout=config.presentation_timeout,
-    )
-    return PresentationProof(
-        mode="desktop",
-        verified=True,
-        evidence=str(ack_path),
-        selected_thread_id=proof["selected_thread_id"],
-    )
-
-
-def _run_presentation_command(
-    command: str,
-    *,
-    config: ProtocolConfig,
-    thread_id: str,
-    turn_id: str,
-    uri: str,
-    ack_path: Path,
-) -> None:
-    try:
-        argv = shlex.split(command)
-    except ValueError as error:
-        raise AppServerFailure(
-            code="desktop_presentation_failed",
-            detail=f"invalid Desktop presentation command: {error}",
-        ) from error
-    if not argv:
-        raise AppServerFailure(
-            code="desktop_presentation_failed",
-            detail="Desktop presentation command is empty",
-        )
-    payload = {
-        "thread_id": thread_id,
-        "turn_id": turn_id,
-        "chain_id": config.relay_chain_id,
-        "relay_sequence": config.relay_sequence,
-        "source_thread_id": config.source_thread_id,
-        "thread_name": config.thread_name,
-        "uri": uri,
-    }
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "RELAY_DESKTOP_THREAD_ID": thread_id,
-            "RELAY_DESKTOP_TURN_ID": turn_id,
-            "RELAY_DESKTOP_SOURCE_THREAD_ID": config.source_thread_id or "",
-            "RELAY_DESKTOP_THREAD_NAME": config.thread_name or "",
-            "RELAY_DESKTOP_URI": uri,
-            "RELAY_DESKTOP_ACK_PATH": (
-                str(ack_path)
-            ),
-        }
-    )
-    try:
-        result = subprocess.run(
-            argv,
-            input=json.dumps(payload, separators=(",", ":")),
-            capture_output=True,
-            text=True,
-            timeout=config.presentation_timeout,
-            check=False,
-            env=environment,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise AppServerFailure(
-            code="desktop_presentation_failed",
-            detail=str(error),
-        ) from error
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or "command failed"
-        raise AppServerFailure(
-            code="desktop_presentation_failed",
-            detail=detail,
-        )
-
-
-def _wait_for_presentation_ack(
-    path: Path,
-    *,
-    thread_id: str,
-    turn_id: str,
-    chain_id: str | None,
-    sequence: int | None,
-    source_thread_id: str | None,
-    thread_name: str | None,
-    timeout: float,
-) -> dict[str, str | None]:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, json.JSONDecodeError):
-            value = None
-        if isinstance(value, dict) and _valid_presentation_ack(
-            value,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            chain_id=chain_id,
-            sequence=sequence,
-            source_thread_id=source_thread_id,
-            thread_name=thread_name,
-        ):
-            selected = value.get("selected_thread_id")
-            return {"selected_thread_id": selected if isinstance(selected, str) else thread_id}
-        time.sleep(0.05)
-    raise AppServerFailure(
-        code="desktop_visibility_unverified",
-        detail=f"timed out waiting for Desktop to present {thread_id}",
-    )
-
-
-def _valid_presentation_ack(
-    value: dict[str, object],
-    *,
-    thread_id: str,
-    turn_id: str,
-    chain_id: str | None,
-    sequence: int | None,
-    source_thread_id: str | None,
-    thread_name: str | None,
-) -> bool:
-    if value.get("presented") is not True:
-        return False
-    selected = value.get("selected_thread_id")
-    if selected != thread_id:
-        return False
-    if value.get("thread_id") != thread_id or value.get("turn_id") != turn_id:
-        return False
-    if chain_id is not None and value.get("chain_id") != chain_id:
-        return False
-    if sequence is not None and value.get("relay_sequence") != sequence:
-        return False
-    if source_thread_id is not None and value.get("source_thread_id") != source_thread_id:
-        return False
-    # Thread name is useful metadata, but the exact identity proof is the
-    # destination's IDs and chain sequence. Older bridges may not echo the
-    # name, so validate it only when they provide it.
-    if thread_name is not None and "thread_name" in value and value.get("thread_name") != thread_name:
-        return False
-    return True
+def _thread_source(value: object) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and isinstance(value.get("custom"), str):
+        return f"custom:{value['custom']}"
+    return None
 
 
 def _relay_state_path(cwd: Path, thread_id: str) -> Path:
@@ -629,6 +391,7 @@ def _require_thread_settings(result: JsonObject, config: ProtocolConfig) -> None
         ("approvalPolicy", "approvalPolicy"),
         ("approvalsReviewer", "approvalsReviewer"),
         ("model", "model"),
+        ("serviceTier", "serviceTier"),
     ):
         expected = settings.get(requested)
         if expected is not None and result.get(effective) != expected:
@@ -641,13 +404,26 @@ def _require_thread_settings(result: JsonObject, config: ProtocolConfig) -> None
             )
     sandbox = result.get("sandbox")
     expected_sandbox = settings.get("sandboxPolicy")
-    if isinstance(sandbox, dict) and isinstance(expected_sandbox, dict):
+    if isinstance(expected_sandbox, dict):
+        if not isinstance(sandbox, dict):
+            raise AppServerFailure(
+                code="settings_restore_failed",
+                detail="thread/start omitted the requested sandboxPolicy",
+            )
         for key in ("type", "networkAccess"):
             if expected_sandbox.get(key) != sandbox.get(key):
                 raise AppServerFailure(
                     code="settings_restore_failed",
                     detail=f"thread/start changed sandboxPolicy.{key}",
                 )
+    expected_profile = settings.get("permissions")
+    if isinstance(expected_profile, str):
+        active = result.get("activePermissionProfile")
+        if not isinstance(active, dict) or active.get("id") != expected_profile:
+            raise AppServerFailure(
+                code="settings_restore_failed",
+                detail="thread/start did not preserve the active permission profile",
+            )
 
 
 def _nested_id(result: JsonObject, key: str, method: str) -> str:

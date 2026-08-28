@@ -1,12 +1,24 @@
 {
   "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh PreCompact",
+            "statusMessage": "Attempting verified Relay continuation"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
             "command": "bash ${PLUGIN_ROOT}/hooks/relay_hook.sh UserPromptSubmit",
-            "statusMessage": "Checking relay threshold"
+            "statusMessage": "Checking Relay source ownership"
           }
         ]
       }

@@ -1,7 +1,7 @@
 {
   "name": "relay",
-  "version": "0.5.0",
-  "description": "Automatically continue long-running Codex Goals in fresh threads at 30% context usage.",
+  "version": "0.6.0",
+  "description": "Attempt a verified fresh-thread Goal continuation at automatic compaction, otherwise let Codex compact normally.",
   "author": {
     "name": "siddvrth",
     "url": "https://github.com/siddvrth/relay"
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "Relay",
     "shortDescription": "Automatic fresh-thread Goal continuity",
-    "longDescription": "At the default 30% context threshold, Relay reads the current Codex Goal, starts a genuinely fresh app-server thread in the same repository, restores the Goal objective, and continues with a compact live-repo handoff.",
+    "longDescription": "At automatic Goal compaction, Relay attempts a genuinely fresh app-server continuation in the same repository and stops source compaction only after the handoff is verified. Failures defer to native compaction.",
     "developerName": "siddvrth",
     "websiteURL": "https://github.com/siddvrth/relay",
     "category": "Productivity",
@@ -30,7 +30,7 @@
       "Automation"
     ],
     "defaultPrompt": [
-      "Keep Relay enabled while this Goal runs; it automatically starts a fresh thread when context reaches 30%.",
+      "Keep Relay enabled while this Goal runs; at automatic compaction it attempts a verified fresh continuation and otherwise lets Codex compact normally.",
       "In a destination thread, inspect live repository state and continue the same Goal objective without relying on the predecessor transcript."
     ]
   }

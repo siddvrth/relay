@@ -6,10 +6,12 @@ ROOT="${ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 PLUGIN_ROOT="${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 EVENT="${1:-UserPromptSubmit}"
 SCRIPT="$PLUGIN_ROOT/skills/relay/scripts/relay.py"
-THRESHOLD="${RELAY_THRESHOLD:-0.30}"
 PAYLOAD="$(cat || true)"
 
 case "$EVENT" in
+  PreCompact|pre-compact)
+    OFFICIAL_EVENT="PreCompact"
+    ;;
   UserPromptSubmit|user-prompt-submit)
     OFFICIAL_EVENT="UserPromptSubmit"
     ;;
@@ -38,7 +40,6 @@ set +e
 OUTPUT="$(python3 "$SCRIPT" \
   --repo "$ROOT" \
   --stdin-json \
-  --handoff-threshold "$THRESHOLD" \
   --official-hook-event "$OFFICIAL_EVENT" \
   <<<"$PAYLOAD" 2>/dev/null)"
 STATUS=$?

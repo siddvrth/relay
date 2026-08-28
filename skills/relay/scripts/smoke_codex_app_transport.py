@@ -10,11 +10,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 from pathlib import Path
 
-import context_usage
-from codex_app_jsonrpc import AppServerClient
+from codex_app_jsonrpc import AppServerClient, AppServerFailure
 from codex_app_protocol import CLIENT_INFO
 
 
@@ -31,7 +31,14 @@ GOAL = (
 )
 MODEL = "gpt-5.6-luna"
 EFFORT = "low"
-SEED_THRESHOLD = "1.0"
+LOW_LIMIT_ARGS = (
+    "-c",
+    "model_context_window=8000",
+    "-c",
+    "model_auto_compact_token_limit=1000",
+    "-c",
+    'model_auto_compact_token_limit_scope="total"',
+)
 
 
 def _approval_policy() -> str:
@@ -39,7 +46,7 @@ def _approval_policy() -> str:
 
 
 def main() -> int:
-    codex_value = shutil.which("codex")
+    codex_value = os.environ.get("RELAY_SMOKE_CODEX") or shutil.which("codex")
     auth = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "auth.json"
     if codex_value is None:
         print(json.dumps({"ok": False, "skipped": True, "reason": "codex not found"}))
@@ -59,25 +66,16 @@ def main() -> int:
         shutil.copy2(auth, home / "auth.json")
         codex = Path(codex_value).resolve()
         installed = _install_plugin(home, marketplace, codex)
-        environment = os.environ.copy()
-        for variable in (
-            "OMO_CODEX_HOOKS_DISABLED",
-            "CODEX_HOOKS_DISABLED",
-            "CODEX_SESSION_ID",
-            "CODEX_THREAD_ID",
-            "CODEX_CI",
-            "CODEX_SHELL",
-            "RELAY_DESKTOP_HANDOFF",
-        ):
-            environment.pop(variable, None)
+        environment = {
+            variable: os.environ[variable]
+            for variable in ("PATH", "HOME", "USER", "LANG", "LC_ALL")
+            if variable in os.environ
+        }
         environment.update(
             {
                 "CODEX_HOME": str(home),
                 "PLUGIN_ROOT": str(installed),
                 "RELAY_CODEX_BINARY": str(codex),
-                "CODEX_INTERNAL_ORIGINATOR_OVERRIDE": "",
-                "RELAY_PRESENTATION_MODE": "headless",
-                "RELAY_THRESHOLD": SEED_THRESHOLD,
                 "RELAY_APP_SERVER_RESPONSE_TIMEOUT": "30",
                 "RELAY_APP_SERVER_TURN_TIMEOUT": "300",
                 "ROOT": str(repo),
@@ -85,22 +83,31 @@ def main() -> int:
         )
         _trust_installed_relay_hooks(codex, environment, home, repo)
         try:
-            try:
-                result = _run_chain(codex, environment, home, repo, installed)
-            except Exception:
-                failure_dir = os.environ.get("RELAY_SMOKE_FAILURE_DIR")
-                if failure_dir:
-                    destination = Path(failure_dir).expanduser().resolve()
-                    if destination.exists():
-                        raise RuntimeError(
-                            f"smoke failure directory already exists: {destination}"
-                        )
-                    shutil.copytree(root, destination)
-                    print(
-                        f"real smoke artifacts preserved at {destination}",
-                        file=sys.stderr,
-                    )
-                raise
+            contract_ok = _probe_precompact_stop_contract(
+                codex,
+                environment,
+                home,
+                root / "hook-contract-probe",
+            )
+            auto_contract_ok = _probe_packaged_auto_precompact(
+                codex,
+                environment,
+                home,
+                root / "auto-contract-probe",
+            )
+            auto_fallback_ok = _probe_packaged_auto_fallback(
+                codex,
+                environment,
+                home,
+                root / "auto-fallback-probe",
+            )
+            manual_native_ok = _probe_packaged_manual_native(
+                codex,
+                environment,
+                home,
+                root / "manual-native-probe",
+            )
+            result = _run_chain(codex, environment, home, repo, installed)
         finally:
             try:
                 from relay import cleanup_workers
@@ -109,8 +116,63 @@ def main() -> int:
             except (ImportError, OSError, ValueError, TypeError):
                 pass
             _stop_relay_workers(repo)
+        result["real_hook_contract"] = contract_ok
+        result["packaged_auto_precompact"] = auto_contract_ok
+        result["packaged_auto_fallback"] = auto_fallback_ok
+        result["packaged_manual_native"] = manual_native_ok
         print(json.dumps(result, sort_keys=True))
         return 0 if result.get("ok") is True else 1
+
+
+def _exec_seed(
+    codex: Path,
+    repo: Path,
+    environment: dict[str, str],
+    prompt: str,
+    *,
+    extra_args: tuple[str, ...] = (),
+) -> str:
+    result = subprocess.run(
+        [
+            str(codex),
+            "exec",
+            "--json",
+            "--cd",
+            str(repo),
+            "--thread-source",
+            "cli",
+            "--model",
+            MODEL,
+            "--sandbox",
+            "workspace-write",
+            "-c",
+            f'approval_policy="{_approval_policy()}"',
+            "-c",
+            'personality="pragmatic"',
+            *extra_args,
+            prompt,
+        ],
+        cwd=repo,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    for line in result.stdout.splitlines():
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            candidate = value.get("thread_id") or value.get("threadId")
+            if isinstance(candidate, str) and candidate:
+                return candidate
+    raise RuntimeError(
+        f"codex exec seed did not return a thread id: returncode={result.returncode}; "
+        f"stderr={result.stderr[-2000:]!r}"
+    )
 
 
 def _run_chain(
@@ -120,44 +182,23 @@ def _run_chain(
     repo: Path,
     installed: Path,
 ) -> dict[str, object]:
+    seed_prompt = "This is source A. Reply exactly RELAY_SMOKE_A_READY and do not modify files yet."
+    source = _exec_seed(codex, repo, environment, seed_prompt)
+
     seed_process = _server(codex, repo, environment)
     seed_client = _client(seed_process)
     try:
-        source_settings = _settings(repo)
-        source = seed_client.request(
-            "thread/start",
-            {
-                "cwd": str(repo),
-                "model": MODEL,
-                "approvalPolicy": _approval_policy(),
-                "approvalsReviewer": "auto_review",
-                "sandbox": "workspace-write",
-                "personality": "pragmatic",
-                "serviceName": "relay-smoke",
-            },
-        )["thread"]["id"]
-        _turn(
-            seed_client,
-            source,
-            "This is source A. Reply exactly RELAY_SMOKE_A_READY and do not modify files yet.",
-            source_settings,
-        )
+        seed_client.request("thread/resume", {"threadId": source})
         seed_client.request(
             "thread/goal/set",
             {"threadId": source, "objective": GOAL, "status": "active"},
         )
 
         source_path = _thread_path(seed_client, home, source)
-        initial_ratio = context_usage.extract_context_used(
-            {"transcript_path": str(source_path)}
-        )
     finally:
         _stop(seed_process)
 
-    threshold = min((initial_ratio or 0.0) + 0.20, 0.90)
     trigger_environment = dict(environment)
-    trigger_environment["RELAY_THRESHOLD"] = f"{threshold:.6f}"
-    _cross_threshold(source_path, threshold)
     process: subprocess.Popen[bytes] | None = None
     try:
         _invoke_installed_hook(
@@ -166,7 +207,6 @@ def _run_chain(
             trigger_environment,
             source,
             source_path,
-            "Continue the active Relay smoke Goal now.",
         )
         b = _destination(repo, source)
         a_state = _wait_state(repo, source)
@@ -183,14 +223,12 @@ def _run_chain(
         )
         b_settings = _first_settings_context(b_path)
 
-        _cross_threshold(b_path, threshold)
         _invoke_installed_hook(
             installed,
             repo,
             trigger_environment,
             b,
             b_path,
-            "Continue the active Relay smoke Goal and hand off now.",
         )
         c = _destination(repo, b)
         b_state = _wait_state(repo, b)
@@ -205,7 +243,7 @@ def _run_chain(
         _require_worker_cleanup(a_state, label="A-to-B")
 
         c_path = _wait_thread_path(home, c)
-        _wait_agent_message(c_path, "RELAY_SMOKE_C_ACK", timeout=90)
+        _wait_agent_message(c_path, "RELAY_SMOKE_C_ACK", timeout=180)
         process = _server(codex, repo, trigger_environment)
         client = _client(process)
         c_goal_before_control = _wait_goal_status(client, c, "active")
@@ -289,7 +327,6 @@ def _run_chain(
             "no_duplicates": thread_ids == {source, b, c},
             "b_ack": "RELAY_SMOKE_B_WORK_DONE" in b_text,
             "c_ack": "RELAY_SMOKE_C_ACK" in c_text,
-            "test_threshold": round(threshold, 6),
         }
         if not ok:
             result["source_settings"] = expected
@@ -352,13 +389,12 @@ def _invoke_installed_hook(
     environment: dict[str, str],
     thread_id: str,
     transcript_path: Path,
-    prompt: str,
 ) -> None:
     payload = {
         "session_id": thread_id,
         "cwd": str(repo),
-        "prompt": prompt,
         "transcript_path": str(transcript_path),
+        "trigger": "auto",
     }
     hook_environment = dict(environment)
     hook_environment.update(
@@ -369,7 +405,7 @@ def _invoke_installed_hook(
     )
     try:
         result = subprocess.run(
-            ["bash", str(installed / "hooks" / "relay_hook.sh"), "UserPromptSubmit"],
+            ["bash", str(installed / "hooks" / "relay_hook.sh"), "PreCompact"],
             cwd=repo,
             env=hook_environment,
             input=json.dumps(payload, separators=(",", ":")),
@@ -389,8 +425,8 @@ def _invoke_installed_hook(
     if (
         result.returncode != 0
         or not isinstance(response, dict)
-        or response.get("decision") != "block"
         or response.get("continue") is not False
+        or not isinstance(response.get("stopReason"), str)
     ):
         raise RuntimeError(
             "installed Relay hook did not acknowledge handoff: "
@@ -507,23 +543,6 @@ def _state_path(repo: Path, source: str) -> Path:
     return repo / ".omx" / "state" / "relay" / f"{digest}.json"
 
 
-def _cross_threshold(path: Path, threshold: float) -> None:
-    ratio = min(threshold + 0.05, 0.99)
-    total_tokens = round(12_000 + ratio * (100_000 - 12_000))
-    record = {
-        "type": "event_msg",
-        "payload": {
-            "type": "token_count",
-            "info": {
-                "last_token_usage": {"total_tokens": total_tokens},
-                "model_context_window": 100_000,
-            },
-        },
-    }
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, separators=(",", ":")) + "\n")
-
-
 def _first_settings_context(path: Path) -> dict[str, object]:
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -540,11 +559,35 @@ def _first_settings_context(path: Path) -> dict[str, object]:
 
 def _settings_fingerprint(value: dict[str, object]) -> dict[str, object]:
     sandbox = value.get("sandbox_policy")
+    collaboration = value.get("collaboration_mode")
+    collaboration_settings = collaboration.get("settings") if isinstance(collaboration, dict) else None
+    profile = value.get("active_permission_profile")
+    permission = value.get("permission_profile")
     return {
         "model": value.get("model"),
+        "effort": value.get("effort"),
         "personality": value.get("personality"),
         "approval_policy": value.get("approval_policy"),
         "approvals_reviewer": value.get("approvals_reviewer"),
+        "service_tier": value.get("service_tier"),
+        "summary": value.get("summary"),
+        "collaboration": {
+            "mode": collaboration.get("mode"),
+            "model": collaboration_settings.get("model")
+            if isinstance(collaboration_settings, dict)
+            else None,
+            "reasoning_effort": collaboration_settings.get("reasoning_effort")
+            if isinstance(collaboration_settings, dict)
+            else None,
+        }
+        if isinstance(collaboration, dict)
+        else None,
+        "active_permission_profile": profile.get("id")
+        if isinstance(profile, dict)
+        else None,
+        "permission_profile_type": permission.get("type")
+        if isinstance(permission, dict)
+        else None,
         "sandbox": {
             "type": sandbox.get("type"),
             "network_access": sandbox.get("network_access"),
@@ -657,6 +700,18 @@ def _wait_agent_message(path: Path, text: str, *, timeout: float) -> None:
     raise RuntimeError(f"timed out waiting for completed assistant message {text}")
 
 
+def _wait_rollout_marker(path: Path, marker: str, *, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if marker in path.read_text(encoding="utf-8"):
+                return
+        except OSError:
+            pass
+        time.sleep(0.05)
+    raise RuntimeError(f"timed out waiting for rollout marker {marker}")
+
+
 def _session_thread_ids(home: Path, repo: Path) -> set[str]:
     thread_ids: set[str] = set()
     for path in (home / "sessions").rglob("*.jsonl"):
@@ -729,8 +784,15 @@ def _trust_installed_relay_hooks(
         if item.get("source") == "plugin"
         and item.get("pluginId") == "relay@relay-smoke"
     ]
-    if len(relay_hooks) != 3:
-        raise RuntimeError(f"expected three installed Relay hooks, got {relay_hooks!r}")
+    if len(relay_hooks) != 4:
+        raise RuntimeError(f"expected four installed Relay hooks, got {relay_hooks!r}")
+    precompact = [
+        hook
+        for hook in relay_hooks
+        if hook.get("eventName") == "preCompact" and hook.get("matcher") == "auto"
+    ]
+    if len(precompact) != 1:
+        raise RuntimeError(f"installed Relay PreCompact hook is not auto-only: {relay_hooks!r}")
 
     blocks: list[str] = []
     for hook in relay_hooks:
@@ -765,6 +827,298 @@ def _trust_installed_relay_hooks(
         raise RuntimeError(f"installed Relay hooks are not trusted: {relay_trust!r}")
 
 
+def _probe_precompact_stop_contract(
+    codex: Path,
+    environment: dict[str, str],
+    home: Path,
+    repo: Path,
+) -> bool:
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    hook_dir = repo / ".codex"
+    hook_dir.mkdir()
+    marker = repo / "precompact-marker.json"
+    script = hook_dir / "precompact_probe.py"
+    script.write_text(
+        textwrap.dedent(
+            f"""
+            import json
+            import sys
+            from pathlib import Path
+
+            payload = json.load(sys.stdin)
+            Path({str(marker)!r}).write_text(json.dumps(payload), encoding="utf-8")
+            print(json.dumps({{"continue": False, "stopReason": "contract probe stopped compaction"}}))
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    command = f'python3 "{script}"'
+    (hook_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreCompact": [
+                        {
+                            "matcher": "manual",
+                            "hooks": [{"type": "command", "command": command}],
+                        }
+                    ]
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bootstrap = _server(codex, repo, environment)
+    bootstrap_client = _client(bootstrap)
+    try:
+        bootstrap_client.request(
+            "thread/start",
+            {"cwd": str(repo), "approvalPolicy": "never", "sandbox": "workspace-write"},
+        )
+    finally:
+        _stop(bootstrap)
+
+    hooks = _list_hooks(codex, environment, repo)
+    probes = [
+        hook
+        for hook in hooks
+        if hook.get("eventName") == "preCompact"
+        and hook.get("matcher") == "manual"
+        and hook.get("command") == command
+    ]
+    if len(probes) != 1:
+        raise RuntimeError(f"current Codex did not load the PreCompact probe: {probes!r}")
+    key = probes[0].get("key")
+    current_hash = probes[0].get("currentHash")
+    if not isinstance(key, str) or not isinstance(current_hash, str):
+        raise RuntimeError(f"PreCompact probe has no trust identity: {probes[0]!r}")
+    with (home / "config.toml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            f'\n[hooks.state.{json.dumps(key)}]\ntrusted_hash = {json.dumps(current_hash)}\n'
+        )
+
+    process = _server(codex, repo, environment)
+    client = _client(process)
+    try:
+        thread = client.request(
+            "thread/start",
+            {"cwd": str(repo), "approvalPolicy": "never", "sandbox": "workspace-write"},
+        ).get("thread")
+        if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
+            raise RuntimeError("PreCompact probe thread/start returned no thread id")
+        thread_id = thread["id"]
+        _turn(client, thread_id, "Reply exactly PRECOMPACT_PROBE_READY.", _settings(repo))
+        client.request("thread/compact/start", {"threadId": thread_id})
+        deadline = time.monotonic() + 10
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not marker.exists():
+            raise RuntimeError("current Codex did not execute the trusted PreCompact probe")
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        if (
+            payload.get("hook_event_name") != "PreCompact"
+            or payload.get("trigger") != "manual"
+            or payload.get("session_id") != thread_id
+            or not isinstance(payload.get("turn_id"), str)
+        ):
+            raise RuntimeError(f"unexpected real PreCompact payload: {payload!r}")
+        time.sleep(0.2)
+        read = client.request("thread/read", {"threadId": thread_id, "includeTurns": True})
+        serialized = json.dumps(read)
+        if "contextCompaction" in serialized:
+            raise RuntimeError("continue:false probe did not prevent current Codex compaction")
+        return True
+    except AppServerFailure as error:
+        raise RuntimeError(f"real PreCompact contract probe failed: {error}") from error
+    finally:
+        _stop(process)
+
+
+def _probe_packaged_auto_precompact(
+    codex: Path,
+    environment: dict[str, str],
+    home: Path,
+    repo: Path,
+) -> bool:
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    probe_environment = dict(environment)
+    probe_environment["ROOT"] = str(repo)
+    source = _exec_seed(
+        codex,
+        repo,
+        probe_environment,
+        "Reply exactly PRECOMPACT_SEED_READY. " + ("context " * 2500),
+        extra_args=LOW_LIMIT_ARGS,
+    )
+    process = _server(
+        codex,
+        repo,
+        probe_environment,
+        extra_args=LOW_LIMIT_ARGS,
+    )
+    client = _client(process)
+    try:
+        client.request("thread/resume", {"threadId": source})
+        objective = (
+            "Prove the packaged Relay PreCompact(auto) contract. Reply exactly "
+            "AUTO_PRECOMPACT_PRIMED, use no tools, and keep this Goal active."
+        )[:3900]
+        client.request(
+            "thread/goal/set",
+            {"threadId": source, "objective": objective, "status": "active"},
+        )
+        source_path = _wait_thread_path(home, source)
+        state = _wait_state(repo, source)
+        destination = state.get("destination_thread_id")
+        if not isinstance(destination, str) or destination == source:
+            raise RuntimeError(f"packaged auto hook produced no fresh destination: {state!r}")
+
+        normal = _server(codex, repo, probe_environment)
+        normal_client = _client(normal)
+        try:
+            normal_client.request(
+                "thread/goal/set",
+                {"threadId": destination, "status": "complete"},
+            )
+            normal_client.request(
+                "thread/goal/set",
+                {"threadId": source, "status": "complete"},
+            )
+        finally:
+            _stop(normal)
+        _wait_outcome(repo, source, "completed")
+        _require_worker_cleanup(state, label="packaged-auto-contract")
+
+        read = client.request("thread/read", {"threadId": source, "includeTurns": True})
+        if "contextCompaction" in json.dumps(read):
+            raise RuntimeError("packaged auto hook allowed native compaction after handoff")
+        ids = _session_thread_ids(home, repo)
+        if ids != {source, destination}:
+            raise RuntimeError(f"packaged auto hook created duplicate destinations: {ids!r}")
+        rollout = source_path.read_text(encoding="utf-8")
+        if "turn_aborted" not in rollout:
+            raise RuntimeError("source rollout lacks the interrupted auto-compaction turn")
+        return True
+    finally:
+        if source is not None:
+            try:
+                client.request("thread/goal/set", {"threadId": source, "status": "complete"})
+            except AppServerFailure:
+                pass
+        _stop(process)
+
+
+def _probe_packaged_auto_fallback(
+    codex: Path,
+    environment: dict[str, str],
+    home: Path,
+    repo: Path,
+) -> bool:
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    probe_environment = dict(environment)
+    probe_environment["ROOT"] = str(repo)
+    probe_environment["RELAY_CODEX_APP_TRANSPORT"] = "disabled"
+    source = _exec_seed(
+        codex,
+        repo,
+        probe_environment,
+        "Reply exactly FALLBACK_SEED_READY. " + ("context " * 2500),
+        extra_args=LOW_LIMIT_ARGS,
+    )
+    process = _server(codex, repo, probe_environment, extra_args=LOW_LIMIT_ARGS)
+    client = _client(process)
+    try:
+        client.request("thread/resume", {"threadId": source})
+        client.request(
+            "thread/goal/set",
+            {
+                "threadId": source,
+                "objective": "Prove native compaction remains available when Relay cannot hand off.",
+                "status": "active",
+            },
+        )
+        rollout = _thread_path(client, home, source)
+        _wait_rollout_marker(rollout, '"type":"ContextCompaction"', timeout=60)
+        if _state_path(repo, source).exists():
+            raise RuntimeError("Relay wrote destination state despite disabled transport")
+        return True
+    finally:
+        try:
+            client.request("thread/goal/set", {"threadId": source, "status": "complete"})
+        except AppServerFailure:
+            pass
+        _stop(process)
+
+
+def _probe_packaged_manual_native(
+    codex: Path,
+    environment: dict[str, str],
+    home: Path,
+    repo: Path,
+) -> bool:
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    probe_environment = dict(environment)
+    probe_environment["ROOT"] = str(repo)
+    process = _server(codex, repo, probe_environment)
+    client = _client(process)
+    try:
+        thread = client.request(
+            "thread/start",
+            {
+                "cwd": str(repo),
+                "model": MODEL,
+                "approvalPolicy": "never",
+                "sandbox": "workspace-write",
+                "threadSource": "cli",
+            },
+        ).get("thread")
+        if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
+            raise RuntimeError("manual compact probe thread/start returned no thread id")
+        thread_id = thread["id"]
+        _turn(client, thread_id, "Reply exactly MANUAL_COMPACT_SEED.", _settings(repo))
+        rollout = _thread_path(client, home, thread_id)
+        before = _compaction_count(rollout)
+        client.request("thread/compact/start", {"threadId": thread_id})
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            try:
+                after = _compaction_count(rollout)
+            except OSError:
+                after = before
+            if after > before:
+                break
+            time.sleep(0.05)
+        else:
+            raise RuntimeError("packaged manual compact did not record a native compaction item")
+        if _state_path(repo, thread_id).exists():
+            raise RuntimeError("packaged auto-only hook launched on manual compact")
+        return True
+    finally:
+        _stop(process)
+
+
+def _compaction_count(path: Path) -> int:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return 0
+    return sum(
+        text.count(marker)
+        for marker in (
+            '"type":"ContextCompaction"',
+            '"type":"context_compacted"',
+            '"type":"Compaction"',
+        )
+    )
+
+
 def _list_hooks(
     codex: Path,
     environment: dict[str, str],
@@ -794,9 +1148,10 @@ def _server(
     codex: Path,
     cwd: Path,
     environment: dict[str, str],
+    extra_args: tuple[str, ...] = (),
 ) -> subprocess.Popen[bytes]:
     return subprocess.Popen(
-        [str(codex), "app-server", "--stdio"],
+        [str(codex), "app-server", *extra_args, "--stdio"],
         cwd=cwd,
         env=environment,
         stdin=subprocess.PIPE,

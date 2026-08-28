@@ -33,12 +33,7 @@ class LaunchConfig:
     response_timeout: float = 30.0
     turn_timeout: float = 3600.0
     thread_name: str | None = None
-    relay_chain_id: str | None = None
-    relay_sequence: int | None = None
     source_thread_id: str | None = None
-    presentation_mode: str = "headless"
-    presentation_timeout: float = 10.0
-    presentation_ack_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +43,6 @@ class LaunchResult:
     destination_turn_id: str | None
     worker_pid: int | None = None
     error: str | None = None
-    presentation_verified: bool = False
 
 
 def launch(
@@ -61,8 +55,8 @@ def launch(
     The worker stays detached while the destination owns the Goal, then closes
     its app-server and writes a completed outcome when that Goal becomes
     terminal or the destination acknowledges its own successor. The hook
-    process returns promptly after the destination is real and, for Desktop
-    mode, the exact presentation proof has been observed.
+    process returns promptly after the destination is real and its first turn
+    has started.
     """
 
     try:
@@ -138,14 +132,12 @@ def launch(
     if not isinstance(thread_id, str) or not isinstance(turn_id, str):
         _reap_worker(worker)
         return LaunchResult(False, None, None, error="worker_acknowledgement_missing_ids")
-    presentation_verified = message.get("presentation_verified") is True
     _release_worker_handle(worker)
     return LaunchResult(
         True,
         thread_id,
         turn_id,
         worker_pid=worker.pid,
-        presentation_verified=presentation_verified,
     )
 
 
@@ -179,9 +171,6 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
                         "acknowledged": True,
                         "thread_id": result.thread_id,
                         "turn_id": result.turn_id,
-                        "presentation_verified": bool(
-                            result.presentation and result.presentation.verified
-                        ),
                     },
                     acknowledgement,
                 )
@@ -199,9 +188,9 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
                     outcome_path,
                     {
                         "status": "completed",
+                        "worker_pid": os.getpid(),
                         "thread_id": completion.acknowledgement.thread_id,
                         "turn_id": completion.acknowledgement.turn_id,
-                        "presentation_verified": completion.presentation_verified,
                     },
                 )
             return 0
@@ -238,15 +227,8 @@ def _validate(config: LaunchConfig) -> None:
         raise ValueError(f"codex binary not found: {config.codex_binary}")
     if config.response_timeout <= 0 or config.turn_timeout <= 0:
         raise ValueError("app-server timeouts must be positive")
-    if config.presentation_timeout <= 0:
-        raise ValueError("presentation timeout must be positive")
     if config.outcome_path is not None and not config.outcome_path.is_absolute():
         raise ValueError("outcome path must be absolute")
-    if (
-        config.presentation_ack_path is not None
-        and not config.presentation_ack_path.is_absolute()
-    ):
-        raise ValueError("presentation acknowledgement path must be absolute")
 
 
 def _config_json(config: LaunchConfig) -> dict[str, object]:
@@ -263,16 +245,7 @@ def _config_json(config: LaunchConfig) -> dict[str, object]:
         "response_timeout": config.response_timeout,
         "turn_timeout": config.turn_timeout,
         "thread_name": config.thread_name,
-        "relay_chain_id": config.relay_chain_id,
-        "relay_sequence": config.relay_sequence,
         "source_thread_id": config.source_thread_id,
-        "presentation_mode": config.presentation_mode,
-        "presentation_timeout": config.presentation_timeout,
-        "presentation_ack_path": (
-            str(config.presentation_ack_path)
-            if config.presentation_ack_path is not None
-            else None
-        ),
     }
 
 
@@ -283,12 +256,6 @@ def _config_from_json(payload: object) -> ProtocolConfig:
     status = payload.get("goal_status")
     token_budget = payload.get("goal_token_budget")
     settings = payload.get("settings")
-    presentation_mode_value = payload.get("presentation_mode")
-    presentation_mode = (
-        presentation_mode_value
-        if isinstance(presentation_mode_value, str)
-        else "headless"
-    )
     return ProtocolConfig(
         cwd=Path(str(payload["cwd"])),
         continuation_prompt=str(payload["continuation_prompt"]),
@@ -309,27 +276,9 @@ def _config_from_json(payload: object) -> ProtocolConfig:
             if isinstance(payload.get("thread_name"), str)
             else None
         ),
-        relay_chain_id=(
-            payload.get("relay_chain_id")
-            if isinstance(payload.get("relay_chain_id"), str)
-            else None
-        ),
-        relay_sequence=(
-            payload.get("relay_sequence")
-            if isinstance(payload.get("relay_sequence"), int)
-            and not isinstance(payload.get("relay_sequence"), bool)
-            else None
-        ),
         source_thread_id=(
             payload.get("source_thread_id")
             if isinstance(payload.get("source_thread_id"), str)
-            else None
-        ),
-        presentation_mode=presentation_mode,
-        presentation_timeout=float(payload.get("presentation_timeout", 10.0)),
-        presentation_ack_path=(
-            Path(payload["presentation_ack_path"])
-            if isinstance(payload.get("presentation_ack_path"), str)
             else None
         ),
     )
@@ -385,6 +334,10 @@ def stop_worker_pid(
     except (ProcessLookupError, PermissionError):
         pass
     return not _pid_exists(pid)
+
+
+def worker_pid_is_relay(pid: int, *, repo: Path) -> bool:
+    return pid > 0 and _is_relay_worker(pid, repo) and _pid_exists(pid)
 
 
 def _is_relay_worker(pid: int, repo: Path | None) -> bool:

@@ -5,7 +5,6 @@ Relay writes one local continuation record per source thread. Treat it as sensit
 ## Supported Surface
 
 - `skills/relay/scripts/relay.py`
-- `skills/relay/scripts/context_usage.py`
 - `skills/relay/scripts/codex_app_transport.py`
 - `skills/relay/scripts/codex_app_protocol.py`
 - `.codex-plugin/plugin.json`
@@ -36,6 +35,6 @@ The scripts read only documented Relay settings and the normal Codex environment
 
 Relay passes the compact continuation to the local Codex app-server process selected by the user's
 normal Codex configuration. It does not copy a transcript or send state to an unrelated service.
-Telemetry and filesystem inspection fail open. Source blocking and tool denial are defense-in-depth
+Hook-state and filesystem inspection fail open. Source blocking and tool denial are defense-in-depth
 hook responses, not operating-system write ACLs; users should still review hook trust and repository
 permissions in Codex.

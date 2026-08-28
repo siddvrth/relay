@@ -6,7 +6,7 @@
 
 - [ ] Plugin runtime or hook changed
 - [ ] Goal/app-server contract changed
-- [ ] Telemetry behavior changed
+- [ ] Compaction/hook behavior changed
 - [ ] Docs only
 
 # Validation
@@ -17,7 +17,7 @@
 
 # Checklist
 
-- [ ] Below/equal/above 30% behavior is covered
+- [ ] `PreCompact(auto)` success/failure and manual `/compact` behavior are covered
 - [ ] Destination is fresh and uses `thread/start`, not `thread/fork`
 - [ ] Goal objective is restored when source Goal API is available
 - [ ] No raw transcripts, secrets, private paths, or unrelated project names are committed
