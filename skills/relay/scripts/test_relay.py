@@ -770,6 +770,44 @@ class RelayTests(unittest.TestCase):
             foreign.terminate()
             foreign.wait(timeout=5)
 
+    def test_foreign_live_completed_worker_state_fails_open(self) -> None:
+        foreign = subprocess.Popen(["sleep", "5"])
+        try:
+            state_path, _ = relay._state_paths(self.repo, "foreign-completed")
+            outcome_path = state_path.with_suffix(".outcome.json")
+            relay._write_state(
+                outcome_path,
+                {
+                    "status": "completed",
+                    "worker_pid": foreign.pid,
+                    "thread_id": "foreign-completed-destination",
+                    "turn_id": "foreign-completed-turn",
+                },
+            )
+            relay._write_state(
+                state_path,
+                {
+                    "status": "running",
+                    "source_session_id": "foreign-completed",
+                    "cwd": str(self.repo.resolve()),
+                    "destination_thread_id": "foreign-completed-destination",
+                    "destination_turn_id": "foreign-completed-turn",
+                    "relay_chain_id": "foreign-completed-chain",
+                    "relay_sequence": 1,
+                    "destination_relay_sequence": 2,
+                    "worker_pid": foreign.pid,
+                    "outcome_path": str(outcome_path),
+                },
+            )
+            with self.env():
+                response = self.call("foreign-completed", event="UserPromptSubmit")
+            self.assertEqual(response, {"continue": True})
+            self.assertEqual(self.state("foreign-completed")["status"], "failed")
+            self.assertIn("not a live Relay worker", self.state("foreign-completed")["error"])
+        finally:
+            foreign.terminate()
+            foreign.wait(timeout=5)
+
     def test_destination_session_end_cleans_parent_chain_worker(self) -> None:
         state_path, _ = relay._state_paths(self.repo, "source-A")
         outcome_path = state_path.with_suffix(".outcome.json")

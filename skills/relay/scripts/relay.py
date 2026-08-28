@@ -1641,6 +1641,8 @@ def _running_state_failure(
     if outcome.get("status") == "completed":
         if outcome.get("worker_pid") != pid:
             return "completed outcome worker identity did not match Relay state"
+        if _pid_is_alive(pid) and not worker_pid_is_relay(pid, repo=repo):
+            return "completed outcome worker is not a live Relay worker"
     if outcome.get("status") == "running" and _pid_is_alive(pid):
         if not worker_pid_is_relay(pid, repo=repo):
             return "running state worker is not a live Relay worker"
