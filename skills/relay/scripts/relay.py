@@ -166,6 +166,7 @@ def handle_hook(
                     return _allow(event)
             pending_failure: str | None = None
             invalid_running_state = False
+            cleanup_blocked = False
             if state and state.get("status") == "running":
                 running_state_failure = _running_state_failure(
                     state,
@@ -176,11 +177,13 @@ def handle_hook(
                 pending_failure = running_state_failure or _destination_failure(state)
                 if pending_failure is None:
                     return _quiesce(event, state)
-                cleanup_workers(repo, session_id=session_id)
-                failed_state = dict(state)
+                cleanup_result = cleanup_workers(repo, session_id=session_id)
+                cleanup_blocked = bool(cleanup_result.get("skipped"))
+                post_cleanup_state = _read_state(state_path)
+                failed_state = dict(post_cleanup_state or state)
                 failed_state.update(
                     {
-                        "status": "failed",
+                        "status": "cleanup_failed" if cleanup_blocked else "failed",
                         "error": pending_failure,
                         "failure_recorded": False,
                         "updated_at": _timestamp(),
@@ -190,11 +193,13 @@ def handle_hook(
                 state = failed_state
             elif state and state.get("status") == "starting":
                 pending_failure = "handoff remained in starting state"
-                cleanup_workers(repo, session_id=session_id)
-                failed_state = dict(state)
+                cleanup_result = cleanup_workers(repo, session_id=session_id)
+                cleanup_blocked = bool(cleanup_result.get("skipped"))
+                post_cleanup_state = _read_state(state_path)
+                failed_state = dict(post_cleanup_state or state)
                 failed_state.update(
                     {
-                        "status": "failed",
+                        "status": "cleanup_failed" if cleanup_blocked else "failed",
                         "error": pending_failure,
                         "failure_recorded": False,
                         "updated_at": _timestamp(),
@@ -250,6 +255,8 @@ def handle_hook(
                         failure_count=failure_count,
                         failure=pending_failure,
                     )
+                    return _allow(event)
+                if cleanup_blocked:
                     return _allow(event)
                 if invalid_running_state:
                     return _allow(event)
@@ -1289,7 +1296,7 @@ def cleanup_workers(
     )
     worker_pids.difference_update(protected_worker_pids)
     for pid in sorted(worker_pids):
-        if stop_worker_pid(pid, repo=repo):
+        if stop_worker_pid(pid, repo=repo) or not _pid_is_alive(pid):
             cleaned.append(pid)
         else:
             skipped.append(pid)
@@ -1642,10 +1649,15 @@ def _running_state_failure(
         if outcome.get("worker_pid") != pid:
             return "completed outcome worker identity did not match Relay state"
         if _pid_is_alive(pid) and not worker_pid_is_relay(pid, repo=repo):
-            return "completed outcome worker is not a live Relay worker"
+            # The worker can exit between the liveness and command checks
+            # immediately after writing its completed outcome. Recheck before
+            # classifying the PID as a foreign live process.
+            if _pid_is_alive(pid) and not worker_pid_is_relay(pid, repo=repo):
+                return "completed outcome worker is not a live Relay worker"
     if outcome.get("status") == "running" and _pid_is_alive(pid):
         if not worker_pid_is_relay(pid, repo=repo):
-            return "running state worker is not a live Relay worker"
+            if _pid_is_alive(pid) and not worker_pid_is_relay(pid, repo=repo):
+                return "running state worker is not a live Relay worker"
     return None
 
 

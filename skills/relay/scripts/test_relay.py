@@ -637,7 +637,7 @@ class RelayTests(unittest.TestCase):
             relay,
             "stop_worker_pid",
             side_effect=[True, False],
-        ):
+        ), mock.patch.object(relay, "_pid_is_alive", return_value=True):
             result = relay.cleanup_workers(self.repo, chain_id=chain_id)
         self.assertEqual(result, {"cleaned": [111], "skipped": [222]})
         self.assertEqual(self.state("cleanup-a")["status"], "cancelled")
@@ -697,7 +697,7 @@ class RelayTests(unittest.TestCase):
             relay,
             "stop_worker_pid",
             side_effect=[True, False],
-        ):
+        ), mock.patch.object(relay, "_pid_is_alive", return_value=True):
             result = relay.cleanup_workers(self.repo, chain_id=chain_id)
 
         self.assertEqual(result, {"cleaned": [333], "skipped": [444]})
@@ -764,8 +764,9 @@ class RelayTests(unittest.TestCase):
             with self.env():
                 response = self.call("foreign", event="UserPromptSubmit")
             self.assertEqual(response, {"continue": True})
-            self.assertEqual(self.state("foreign")["status"], "failed")
+            self.assertEqual(self.state("foreign")["status"], "cleanup_failed")
             self.assertIn("not a live Relay worker", self.state("foreign")["error"])
+            relay._write_state(outcome_path, {"status": "cancelled", "worker_pid": foreign.pid})
         finally:
             foreign.terminate()
             foreign.wait(timeout=5)
@@ -802,11 +803,59 @@ class RelayTests(unittest.TestCase):
             with self.env():
                 response = self.call("foreign-completed", event="UserPromptSubmit")
             self.assertEqual(response, {"continue": True})
-            self.assertEqual(self.state("foreign-completed")["status"], "failed")
+            self.assertEqual(self.state("foreign-completed")["status"], "cleanup_failed")
             self.assertIn("not a live Relay worker", self.state("foreign-completed")["error"])
         finally:
             foreign.terminate()
             foreign.wait(timeout=5)
+
+    def test_cleanup_failure_blocks_retry_until_worker_is_stopped(self) -> None:
+        foreign = subprocess.Popen(["sleep", "5"])
+        try:
+            self._assert_cleanup_failure_blocks_retry(foreign.pid)
+        finally:
+            foreign.terminate()
+            foreign.wait(timeout=5)
+
+    def _assert_cleanup_failure_blocks_retry(self, worker_pid: int) -> None:
+        state_path, _ = relay._state_paths(self.repo, "cleanup-blocked")
+        outcome_path = state_path.with_suffix(".outcome.json")
+        relay._write_state(
+            outcome_path,
+            {"status": "running", "worker_pid": worker_pid},
+        )
+        relay._write_state(
+            state_path,
+            {
+                "status": "running",
+                "source_session_id": "cleanup-blocked",
+                "cwd": str(self.repo.resolve()),
+                "destination_thread_id": "cleanup-blocked-destination",
+                "destination_turn_id": "cleanup-blocked-turn",
+                "relay_chain_id": "cleanup-blocked-chain",
+                "relay_sequence": 1,
+                "destination_relay_sequence": 2,
+                "worker_pid": worker_pid,
+                "outcome_path": str(outcome_path),
+            },
+        )
+        with self.env(), mock.patch.object(
+            relay,
+            "_worker_pids",
+            return_value={worker_pid},
+        ), mock.patch.object(relay, "stop_worker_pid", return_value=False) as stop:
+            first = self.call("cleanup-blocked")
+            second = self.call("cleanup-blocked")
+        self.assertEqual(first, {"continue": True})
+        self.assertEqual(second, {"continue": True})
+        self.assertEqual(stop.call_count, 2)
+        self.assertEqual(self.state("cleanup-blocked")["status"], "cleanup_failed")
+        self.assertEqual(
+            json.loads(outcome_path.read_text(encoding="utf-8"))["status"],
+            "running",
+        )
+        self.assertFalse(any(item.get("method") == "thread/start" for item in self.log_entries()))
+        relay._write_state(outcome_path, {"status": "cancelled", "worker_pid": worker_pid})
 
     def test_destination_session_end_cleans_parent_chain_worker(self) -> None:
         state_path, _ = relay._state_paths(self.repo, "source-A")
