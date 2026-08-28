@@ -546,6 +546,15 @@ class RelayTests(unittest.TestCase):
             state_path, _ = relay._state_paths(self.repo, f"surface-{source}")
             self.assertFalse(state_path.exists())
 
+    def test_mismatched_source_thread_metadata_fails_open(self) -> None:
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"FAKE_CODEX_BAD_THREAD_READ": "1"},
+        ):
+            response = self.call("mismatched-source")
+        self.assertEqual(response, {"continue": True})
+        self.assertFalse(any(item.get("method") == "thread/start" for item in self.log_entries()))
+
     def test_forced_failure_circuit_breaker_fails_open_without_blocking_goal(self) -> None:
         with self.env(), mock.patch.dict(
             os.environ,
@@ -957,9 +966,10 @@ class RelayTests(unittest.TestCase):
                 worker.wait()
 
     def test_orphaned_worker_group_is_killed_after_leader_exit(self) -> None:
-        fake_server = self.root / "orphan-hanging-codex"
+        fake_server = self.root / "relay-launcher"
+        native_server = self.root / "vendor-codex"
         child_pid_path = self.root / "orphan-child.pid"
-        fake_server.write_text(
+        native_server.write_text(
             "#!/usr/bin/env python3\n"
             "import os\n"
             "import pathlib\n"
@@ -967,6 +977,14 @@ class RelayTests(unittest.TestCase):
             "pathlib.Path(os.environ['FAKE_CHILD_PID']).write_text(str(os.getpid()), encoding='utf-8')\n"
             "for _line in __import__('sys').stdin:\n"
             "    time.sleep(60)\n",
+            encoding="utf-8",
+        )
+        native_server.chmod(native_server.stat().st_mode | stat.S_IXUSR)
+        fake_server.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "import sys\n"
+            "os.execv(os.environ['NATIVE_CODEX'], [os.environ['NATIVE_CODEX'], *sys.argv[1:]])\n",
             encoding="utf-8",
         )
         fake_server.chmod(fake_server.stat().st_mode | stat.S_IXUSR)
@@ -995,6 +1013,7 @@ class RelayTests(unittest.TestCase):
         read_fd, write_fd = os.pipe()
         worker_env = os.environ.copy()
         worker_env["FAKE_CHILD_PID"] = str(child_pid_path)
+        worker_env["NATIVE_CODEX"] = str(native_server)
         worker = subprocess.Popen(
             [
                 relay.sys.executable,

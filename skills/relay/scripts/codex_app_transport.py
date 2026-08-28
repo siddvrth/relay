@@ -422,12 +422,18 @@ def _is_relay_worker_group(
         or not codex_binary
     ):
         return False
+    binary_tokens = {
+        codex_binary,
+        Path(codex_binary).name,
+        Path(codex_binary).stem,
+        "codex",
+    }
     for member_pid, member_pgid, stat, command in _process_group_entries(pid):
         if (
             member_pgid == pid
             and member_pid != pid
             and not stat.startswith("Z")
-            and codex_binary in command
+            and any(token and token in command for token in binary_tokens)
             and ("app-server" in command or "--stdio" in command)
         ):
             return True
