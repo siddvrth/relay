@@ -297,7 +297,7 @@ def _goal_snapshot(result: JsonObject) -> GoalSnapshot | None:
 
 def _goal_with_thread_metadata(goal: GoalSnapshot, result: JsonObject) -> GoalSnapshot:
     thread = result.get("thread")
-    if not isinstance(thread, dict):
+    if not isinstance(thread, dict) or thread.get("id") != goal.thread_id:
         return goal
     title = thread.get("name")
     preview = thread.get("preview")
