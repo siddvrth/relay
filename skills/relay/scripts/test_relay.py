@@ -648,6 +648,66 @@ class RelayTests(unittest.TestCase):
         child_outcome = json.loads(Path(child_state["outcome_path"]).read_text(encoding="utf-8"))
         self.assertEqual(child_outcome["status"], "running")
 
+    def test_mixed_worker_cleanup_preserves_completed_outcome(self) -> None:
+        chain_id = "mixed-cleanup"
+        completed_state_path, _ = relay._state_paths(self.repo, "mixed-completed")
+        completed_outcome_path = completed_state_path.with_suffix(".outcome.json")
+        relay._write_state(
+            completed_outcome_path,
+            {
+                "status": "completed",
+                "worker_pid": 333,
+                "thread_id": "destination-mixed-completed",
+                "turn_id": "turn-mixed-completed",
+            },
+        )
+        relay._write_state(
+            completed_state_path,
+            {
+                "status": "running",
+                "source_session_id": "mixed-completed",
+                "destination_thread_id": "destination-mixed-completed",
+                "destination_turn_id": "turn-mixed-completed",
+                "worker_pid": 333,
+                "outcome_path": str(completed_outcome_path),
+                "relay_chain_id": chain_id,
+            },
+        )
+
+        running_state_path, _ = relay._state_paths(self.repo, "mixed-running")
+        running_outcome_path = running_state_path.with_suffix(".outcome.json")
+        relay._write_state(
+            running_outcome_path,
+            {"status": "running", "worker_pid": 444},
+        )
+        relay._write_state(
+            running_state_path,
+            {
+                "status": "running",
+                "source_session_id": "mixed-running",
+                "destination_thread_id": "destination-mixed-running",
+                "destination_turn_id": "turn-mixed-running",
+                "worker_pid": 444,
+                "outcome_path": str(running_outcome_path),
+                "relay_chain_id": chain_id,
+            },
+        )
+
+        with mock.patch.object(relay, "_worker_pids", return_value={333, 444}), mock.patch.object(
+            relay,
+            "stop_worker_pid",
+            side_effect=[True, False],
+        ):
+            result = relay.cleanup_workers(self.repo, chain_id=chain_id)
+
+        self.assertEqual(result, {"cleaned": [333], "skipped": [444]})
+        self.assertEqual(self.state("mixed-completed")["status"], "cancelled")
+        completed_outcome = json.loads(completed_outcome_path.read_text(encoding="utf-8"))
+        self.assertEqual(completed_outcome["status"], "completed")
+        self.assertEqual(self.state("mixed-running")["status"], "cleanup_failed")
+        running_outcome = json.loads(running_outcome_path.read_text(encoding="utf-8"))
+        self.assertEqual(running_outcome["status"], "running")
+
     def test_post_ack_state_persistence_failure_stops_destination_worker(self) -> None:
         real_write = relay._write_state
 

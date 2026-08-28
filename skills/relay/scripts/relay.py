@@ -1297,6 +1297,8 @@ def cleanup_workers(
         if state.get("status") in {"starting", "running", "cleanup_failed"}:
             updated = dict(state)
             state_pid = _int_value(state.get("worker_pid"))
+            outcome_path = state.get("outcome_path")
+            outcome = _read_state(Path(outcome_path)) if isinstance(outcome_path, str) else None
             if state_pid in skipped:
                 updated.update(
                     {
