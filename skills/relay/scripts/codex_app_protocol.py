@@ -313,13 +313,7 @@ def _goal_with_thread_metadata(goal: GoalSnapshot, result: JsonObject) -> GoalSn
             if isinstance(preview, str) and preview.strip()
             else None
         ),
-        source=(
-            thread_source
-            if thread_source in {"cli", "exec"}
-            else "custom:relay"
-            if isinstance(thread_source, str) and thread_source.startswith("relay")
-            else _thread_source(thread.get("source"))
-        ),
+        source=_effective_thread_source(thread.get("source"), thread_source),
     )
 
 
@@ -378,6 +372,17 @@ def _thread_source(value: object) -> str | None:
     if isinstance(value, dict) and isinstance(value.get("custom"), str):
         return f"custom:{value['custom']}"
     return None
+
+
+def _effective_thread_source(source: object, thread_source: object) -> str | None:
+    authoritative = _thread_source(source)
+    if authoritative in {"vscode", "unknown"}:
+        return authoritative
+    if thread_source in {"cli", "exec"}:
+        return thread_source
+    if isinstance(thread_source, str) and thread_source.startswith("relay"):
+        return "custom:relay"
+    return authoritative
 
 
 def _relay_state_path(cwd: Path, thread_id: str) -> Path:

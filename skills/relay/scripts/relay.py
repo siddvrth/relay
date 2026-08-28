@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections import deque
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -26,6 +27,7 @@ from codex_app_transport import (
     LaunchConfig,
     launch,
     stop_worker_pid,
+    worker_pid_is_relay,
 )
 
 
@@ -163,12 +165,15 @@ def handle_hook(
                 if state and state.get("status") == "cleanup_failed":
                     return _allow(event)
             pending_failure: str | None = None
+            invalid_running_state = False
             if state and state.get("status") == "running":
-                pending_failure = _running_state_failure(
+                running_state_failure = _running_state_failure(
                     state,
                     repo=repo,
                     session_id=session_id,
-                ) or _destination_failure(state)
+                )
+                invalid_running_state = running_state_failure is not None
+                pending_failure = running_state_failure or _destination_failure(state)
                 if pending_failure is None:
                     return _quiesce(event, state)
                 cleanup_workers(repo, session_id=session_id)
@@ -245,6 +250,8 @@ def handle_hook(
                         failure_count=failure_count,
                         failure=pending_failure,
                     )
+                    return _allow(event)
+                if invalid_running_state:
                     return _allow(event)
 
             # Prompt and tool hooks only guard an already-acknowledged source.
@@ -1271,20 +1278,7 @@ def cleanup_workers(
         matching_states.append((path, state))
         pid = _int_value(state.get("worker_pid"))
         outcome_path = state.get("outcome_path")
-        outcome: dict[str, Any] | None = None
-        if isinstance(outcome_path, str):
-            outcome = _read_state(Path(outcome_path))
-            if outcome is None or outcome.get("status") == "running":
-                _write_state(
-                    Path(outcome_path),
-                    {
-                        "status": "cancelled",
-                        "error": "Relay worker cancelled by terminal source path",
-                        "worker_pid": pid,
-                        "thread_id": state.get("destination_thread_id"),
-                        "turn_id": state.get("destination_turn_id"),
-                    },
-                )
+        outcome = _read_state(Path(outcome_path)) if isinstance(outcome_path, str) else None
         if pid is not None and (
             state.get("status") in {"starting", "running"}
             or (outcome is not None and outcome.get("status") == "running")
@@ -1313,6 +1307,21 @@ def cleanup_workers(
                 )
                 _write_state(path, updated)
                 continue
+            if (
+                isinstance(state.get("outcome_path"), str)
+                and (state_pid in cleaned or state_pid not in worker_pids)
+                and (outcome is None or outcome.get("status") == "running")
+            ):
+                _write_state(
+                    Path(state["outcome_path"]),
+                    {
+                        "status": "cancelled",
+                        "error": "Relay worker cancelled by terminal source path",
+                        "worker_pid": state_pid,
+                        "thread_id": state.get("destination_thread_id"),
+                        "turn_id": state.get("destination_turn_id"),
+                    },
+                )
             updated.update(
                 {
                     "status": "cancelled",
@@ -1630,6 +1639,9 @@ def _running_state_failure(
     if outcome.get("status") == "completed":
         if outcome.get("worker_pid") != pid:
             return "completed outcome worker identity did not match Relay state"
+    if outcome.get("status") == "running" and _pid_is_alive(pid):
+        if not worker_pid_is_relay(pid, repo=repo):
+            return "running state worker is not a live Relay worker"
     return None
 
 

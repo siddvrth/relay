@@ -644,6 +644,9 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(self.state("cleanup-a")["cleanup"], "worker_terminated")
         self.assertEqual(self.state("cleanup-b")["status"], "cleanup_failed")
         self.assertEqual(self.state("cleanup-b")["cleanup"], "worker_still_live")
+        child_state = self.state("cleanup-b")
+        child_outcome = json.loads(Path(child_state["outcome_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(child_outcome["status"], "running")
 
     def test_post_ack_state_persistence_failure_stops_destination_worker(self) -> None:
         real_write = relay._write_state
@@ -673,6 +676,39 @@ class RelayTests(unittest.TestCase):
         state = self.state("persist-failure")
         self.assertEqual(state["status"], "failed")
         self.assertIn("post-ack Relay persistence failed", state["error"])
+
+    def test_foreign_live_worker_state_fails_open_without_quiescing(self) -> None:
+        foreign = subprocess.Popen(["sleep", "5"])
+        try:
+            state_path, _ = relay._state_paths(self.repo, "foreign")
+            outcome_path = state_path.with_suffix(".outcome.json")
+            relay._write_state(
+                outcome_path,
+                {"status": "running", "worker_pid": foreign.pid},
+            )
+            relay._write_state(
+                state_path,
+                {
+                    "status": "running",
+                    "source_session_id": "foreign",
+                    "cwd": str(self.repo.resolve()),
+                    "destination_thread_id": "foreign-destination",
+                    "destination_turn_id": "foreign-turn",
+                    "relay_chain_id": "foreign-chain",
+                    "relay_sequence": 1,
+                    "destination_relay_sequence": 2,
+                    "worker_pid": foreign.pid,
+                    "outcome_path": str(outcome_path),
+                },
+            )
+            with self.env():
+                response = self.call("foreign", event="UserPromptSubmit")
+            self.assertEqual(response, {"continue": True})
+            self.assertEqual(self.state("foreign")["status"], "failed")
+            self.assertIn("not a live Relay worker", self.state("foreign")["error"])
+        finally:
+            foreign.terminate()
+            foreign.wait(timeout=5)
 
     def test_destination_session_end_cleans_parent_chain_worker(self) -> None:
         state_path, _ = relay._state_paths(self.repo, "source-A")
