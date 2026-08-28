@@ -336,10 +336,6 @@ def stop_worker_pid(
     return not _pid_exists(pid)
 
 
-def worker_pid_is_relay(pid: int, *, repo: Path) -> bool:
-    return pid > 0 and _is_relay_worker(pid, repo) and _pid_exists(pid)
-
-
 def _is_relay_worker(pid: int, repo: Path | None) -> bool:
     try:
         result = subprocess.run(

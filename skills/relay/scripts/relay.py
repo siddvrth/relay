@@ -26,7 +26,6 @@ from codex_app_transport import (
     LaunchConfig,
     launch,
     stop_worker_pid,
-    worker_pid_is_relay,
 )
 
 
@@ -1586,6 +1585,15 @@ def _destination_failure(state: Mapping[str, Any]) -> str | None:
         if outcome is None or outcome.get("worker_pid") != pid:
             return "destination worker outcome did not match Relay state"
         if not _pid_is_alive(pid):
+            time.sleep(0.05)
+            latest = _read_state(Path(value)) if isinstance(value, str) else None
+            if (
+                latest is not None
+                and latest.get("status") == "completed"
+                and latest.get("thread_id") == state.get("destination_thread_id")
+                and latest.get("turn_id") == state.get("destination_turn_id")
+            ):
+                return None
             return "destination worker exited before reporting completion"
         return None
     return "destination worker evidence is missing"
@@ -1622,12 +1630,6 @@ def _running_state_failure(
     if outcome.get("status") == "completed":
         if outcome.get("worker_pid") != pid:
             return "completed outcome worker identity did not match Relay state"
-        if _pid_is_alive(pid) and not worker_pid_is_relay(pid, repo=repo):
-            return "completed outcome worker is not a Relay worker"
-    if outcome and outcome.get("status") == "running" and (
-        pid is None or not worker_pid_is_relay(pid, repo=repo)
-    ):
-        return "running state worker is not a live Relay worker"
     return None
 
 
