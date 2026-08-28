@@ -30,6 +30,10 @@ esac
 allow_response() {
   if [[ "$OFFICIAL_EVENT" == "PreToolUse" || "$OFFICIAL_EVENT" == "SessionEnd" ]]; then
     printf '%s\n' '{}'
+  elif [[ "$OFFICIAL_EVENT" == "PreCompact" && "${1:-}" == "python" ]]; then
+    printf '%s\n' '{"continue":true,"systemMessage":"Relay requires Python 3.10 or newer. Native Codex compaction will continue."}'
+  elif [[ "$OFFICIAL_EVENT" == "PreCompact" && "${1:-}" == "execution" ]]; then
+    printf '%s\n' '{"continue":true,"systemMessage":"Relay could not start; native Codex compaction will continue."}'
   else
     printf '%s\n' '{"continue":true}'
   fi
@@ -77,7 +81,7 @@ if [[ -z "$PYTHON_BIN" ]]; then
   else
     printf '%s\n' 'Relay requires Python 3.10 or newer. Install Python 3.10+ and make it available as python3, or set RELAY_PYTHON to a supported executable. Relay is failing open to native Codex behavior.' >&2
   fi
-  allow_response
+  allow_response python
   exit 0
 fi
 
@@ -94,5 +98,5 @@ if [[ $STATUS -eq 0 && "$OUTPUT" == \{* ]]; then
   printf '%s\n' "$OUTPUT"
 else
   printf '%s\n' "Relay hook could not run with Python $PYTHON_VERSION (exit status $STATUS); continuing with native Codex behavior." >&2
-  allow_response
+  allow_response execution
 fi

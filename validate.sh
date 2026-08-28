@@ -110,7 +110,7 @@ else
 fi
 
 if [[ "${RELAY_RUN_REAL_SMOKE:-0}" == "1" ]]; then
-  python3 "$SKILL/smoke_codex_app_transport.py"
+  "$VALIDATION_PYTHON" "$SKILL/smoke_codex_app_transport.py"
 else
   echo "real local app-server smoke: SKIPPED (set RELAY_RUN_REAL_SMOKE=1)"
 fi

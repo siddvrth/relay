@@ -352,6 +352,40 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(manual, {"continue": True})
         self.assertEqual(len([x for x in self.log_entries() if x.get("method") == "thread/start"]), 1)
 
+    def test_precompact_unsupported_python_includes_system_message(self) -> None:
+        unsupported_python = self.root / "python3.9"
+        unsupported_python.write_text(
+            "#!/bin/sh\n"
+            "printf '3.9\\n'\n",
+            encoding="utf-8",
+        )
+        unsupported_python.chmod(
+            unsupported_python.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+        plugin_root = Path(__file__).resolve().parents[3]
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "PLUGIN_ROOT": str(plugin_root),
+                "RELAY_PYTHON": str(unsupported_python),
+                "ROOT": str(self.repo),
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(plugin_root / "hooks" / "relay_hook.sh"), "PreCompact"],
+            cwd=self.repo,
+            env=environment,
+            input='{"trigger":"auto"}\n',
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        response = json.loads(result.stdout)
+        self.assertEqual(
+            response["systemMessage"],
+            "Relay requires Python 3.10 or newer. Native Codex compaction will continue.",
+        )
+
     def test_no_goal_and_terminal_goal_allow_native_compaction(self) -> None:
         with self.env(), mock.patch.dict(os.environ, {"FAKE_CODEX_NO_GOAL": "1"}):
             self.assertEqual(self.call("no-goal"), {"continue": True})
