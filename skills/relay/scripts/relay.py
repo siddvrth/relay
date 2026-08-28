@@ -117,6 +117,8 @@ def handle_hook(
 
     state_path, lock_path = _state_paths(repo, session_id)
     acknowledged_worker_pid: int | None = None
+    acknowledged_destination_thread_id: str | None = None
+    acknowledged_destination_turn_id: str | None = None
 
     try:
         with _locked(lock_path):
@@ -473,6 +475,8 @@ def handle_hook(
                     _write_state(state_path, failed_state)
                 return _allow(event)
             acknowledged_worker_pid = result.worker_pid
+            acknowledged_destination_thread_id = result.destination_thread_id
+            acknowledged_destination_turn_id = result.destination_turn_id
 
             _record_handoff_success(
                 repo,
@@ -527,33 +531,44 @@ def handle_hook(
         # persist its small record.  The next eligible hook can retry.
         if acknowledged_worker_pid is not None:
             outcome_path = state_path.with_suffix(".outcome.json")
-            stopped = stop_worker_pid(acknowledged_worker_pid, repo=repo)
-            if not stopped:
-                stopped = stop_worker_group(
-                    acknowledged_worker_pid,
-                    repo=repo,
-                    outcome_path=outcome_path,
-                )
+            acknowledged_state = _read_state(state_path) or {}
+            acknowledged_state.update(
+                {
+                    "status": "running",
+                    "source_session_id": session_id,
+                    "cwd": str(repo),
+                    "worker_pid": acknowledged_worker_pid,
+                    "outcome_path": str(outcome_path),
+                    "destination_thread_id": acknowledged_destination_thread_id,
+                    "destination_turn_id": acknowledged_destination_turn_id,
+                    "error": "post-ack Relay persistence failed; destination handoff was acknowledged",
+                    "updated_at": _timestamp(),
+                }
+            )
             try:
-                failed_state = _read_state(state_path) or {}
-                failed_state.update(
+                _write_state(state_path, acknowledged_state)
+            except OSError:
+                stopped = stop_worker_pid(acknowledged_worker_pid, repo=repo)
+                if not stopped:
+                    stopped = stop_worker_group(
+                        acknowledged_worker_pid,
+                        repo=repo,
+                        outcome_path=outcome_path,
+                    )
+                fallback_state = dict(acknowledged_state)
+                fallback_state.update(
                     {
                         "status": "failed" if stopped else "cleanup_failed",
-                        "source_session_id": session_id,
-                        "cwd": str(repo),
-                        "worker_pid": acknowledged_worker_pid,
-                        "outcome_path": str(outcome_path),
-                        "error": "post-ack Relay persistence failed; destination worker cleanup attempted",
                         "cleanup": "worker_terminated" if stopped else "worker_still_live",
                         "updated_at": _timestamp(),
                     }
                 )
-                _write_state(
-                    state_path,
-                    failed_state,
-                )
-            except OSError:
-                pass
+                try:
+                    _write_state(state_path, fallback_state)
+                except OSError:
+                    pass
+            else:
+                return _quiesce(event, acknowledged_state)
         return _allow(event)
 
 
@@ -1338,6 +1353,23 @@ def cleanup_workers(
                     {
                         "status": "cleanup_failed",
                         "cleanup": "worker_still_live",
+                        "updated_at": _timestamp(),
+                    }
+                )
+                _write_state(path, updated)
+                continue
+            if (
+                state.get("status") == "cleanup_failed"
+                and outcome is not None
+                and outcome.get("status") == "completed"
+                and outcome.get("worker_pid") == state_pid
+                and outcome.get("thread_id") == state.get("destination_thread_id")
+                and outcome.get("turn_id") == state.get("destination_turn_id")
+            ):
+                updated.update(
+                    {
+                        "status": "running",
+                        "cleanup": "destination_completed",
                         "updated_at": _timestamp(),
                     }
                 )

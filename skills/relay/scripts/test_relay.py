@@ -782,6 +782,58 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(state["worker_pid"], 2345)
         self.assertIn("post-ack Relay persistence failed", state["error"])
 
+    def test_post_ack_persistence_failure_preserves_completed_destination(self) -> None:
+        real_write = relay._write_state
+        failed_writes = 0
+
+        def fail_first_running_states(path: Path, payload: dict[str, object]) -> None:
+            nonlocal failed_writes
+            if payload.get("status") == "running" and "destination_thread_id" in payload and failed_writes < 2:
+                failed_writes += 1
+                raise OSError("simulated state persistence failure")
+            real_write(path, payload)
+
+        def acknowledge(config: codex_app_transport.LaunchConfig) -> codex_app_transport.LaunchResult:
+            assert config.outcome_path is not None
+            real_write(
+                config.outcome_path,
+                {
+                    "status": "completed",
+                    "worker_pid": 3456,
+                    "thread_id": "destination-completed",
+                    "turn_id": "turn-completed",
+                },
+            )
+            return codex_app_transport.LaunchResult(
+                True,
+                "destination-completed",
+                "turn-completed",
+                worker_pid=3456,
+            )
+
+        with self.env(), mock.patch.object(
+            relay,
+            "launch",
+            side_effect=acknowledge,
+        ) as launch_mock, mock.patch.object(
+            relay,
+            "stop_worker_pid",
+            return_value=False,
+        ), mock.patch.object(relay, "stop_worker_group", return_value=False), mock.patch.object(
+            relay,
+            "_write_state",
+            side_effect=fail_first_running_states,
+        ):
+            first = self.call("persist-completed")
+            second = self.call("persist-completed")
+        self.assertEqual(first, {"continue": True})
+        self.assertIs(second["continue"], False)
+        self.assertEqual(launch_mock.call_count, 1)
+        state = self.state("persist-completed")
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(state["destination_thread_id"], "destination-completed")
+        self.assertEqual(state["destination_turn_id"], "turn-completed")
+
     def test_foreign_live_worker_state_fails_open_without_quiescing(self) -> None:
         foreign = subprocess.Popen(["sleep", "5"])
         try:
