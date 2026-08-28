@@ -30,7 +30,7 @@ FAKE_CODEX = textwrap.dedent(
     log_path = pathlib.Path(os.environ["FAKE_CODEX_LOG"])
     thread_id = None
     turn_started = False
-    goal_status = "active"
+    goal_status = os.environ.get("FAKE_CODEX_GOAL_STATUS", "active")
     approval_sent = False
     thread_name = os.environ.get("FAKE_CODEX_TITLE", "Original Relay Goal")
 
@@ -55,8 +55,10 @@ FAKE_CODEX = textwrap.dedent(
         elif method == "thread/goal/get":
             if os.environ.get("FAKE_CODEX_GOAL_ERROR") == "1":
                 send({"id": request_id, "error": {"code": -32000, "message": "goal unavailable"}})
+            elif os.environ.get("FAKE_CODEX_NO_GOAL") == "1":
+                send({"id": request_id, "result": {"goal": None}})
             else:
-                send({"id": request_id, "result": {"goal": {
+                goal = {
                     "threadId": params["threadId"],
                     "objective": os.environ.get("FAKE_CODEX_GOAL", "keep working"),
                     "status": (
@@ -68,19 +70,37 @@ FAKE_CODEX = textwrap.dedent(
                     ),
                     "tokenBudget": 12345,
                     "tokensUsed": int(os.environ.get("FAKE_CODEX_TOKENS_USED", "0")),
-                }}})
+                }
+                if os.environ.get("FAKE_CODEX_MISSING_GOAL_STATUS") == "1":
+                    goal.pop("status")
+                send({"id": request_id, "result": {"goal": goal}})
         elif method == "thread/start":
+            if os.environ.get("FAKE_CODEX_THREAD_START_ERROR") == "1":
+                send({"id": request_id, "error": {"code": -32000, "message": "thread start failed"}})
+                continue
             with log_path.open("r", encoding="utf-8") as handle:
                 starts = sum(1 for item in handle if json.loads(item).get("method") == "thread/start")
             thread_id = os.environ.get("FAKE_CODEX_THREAD_ID", "thread-%d" % starts)
-            send({"id": request_id, "result": {
+            thread_result = {
                 "thread": {"id": thread_id, "cwd": os.getcwd()},
                 "approvalPolicy": params.get("approvalPolicy"),
                 "approvalsReviewer": params.get("approvalsReviewer"),
                 "model": params.get("model"),
-                "sandbox": params.get("sandboxPolicy"),
-            }})
+                "serviceTier": params.get("serviceTier"),
+                "sandbox": None if os.environ.get("FAKE_CODEX_MISSING_SANDBOX") == "1" else {
+                    "type": "workspaceWrite",
+                    "writableRoots": [os.getcwd()],
+                    "networkAccess": False,
+                },
+                "activePermissionProfile": (
+                    {"id": params["permissions"]} if params.get("permissions") else None
+                ),
+            }
+            send({"id": request_id, "result": thread_result})
         elif method == "thread/goal/set":
+            if os.environ.get("FAKE_CODEX_GOAL_SET_ERROR") == "1":
+                send({"id": request_id, "error": {"code": -32000, "message": "goal set failed"}})
+                continue
             goal_status = params.get("status", goal_status)
             send({"id": request_id, "result": {"goal": {
                 "threadId": params.get("threadId"),
@@ -99,6 +119,9 @@ FAKE_CODEX = textwrap.dedent(
             thread_name = params.get("name", thread_name)
             send({"id": request_id, "result": {}})
         elif method == "turn/start":
+            if os.environ.get("FAKE_CODEX_TURN_START_ERROR") == "1":
+                send({"id": request_id, "error": {"code": -32000, "message": "turn start failed"}})
+                continue
             turn_started = True
             turn_id = "turn-%s" % thread_id
             send({"id": request_id, "result": {"turn": {"id": turn_id}}})
@@ -117,11 +140,15 @@ FAKE_CODEX = textwrap.dedent(
                     time.sleep(delay)
                 send({"method": "turn/completed", "params": {"turn": {"id": turn_id, "status": "completed"}}})
         elif method == "thread/read":
+            if os.environ.get("FAKE_CODEX_BAD_THREAD_READ") == "1":
+                send({"id": request_id, "result": {"thread": {"id": "wrong", "cwd": os.getcwd()}}})
+                continue
             send({"id": request_id, "result": {"thread": {
                 "id": params["threadId"],
                 "cwd": os.getcwd(),
                 "name": thread_name,
                 "preview": os.environ.get("FAKE_CODEX_TITLE", "Original Relay Goal"),
+                "source": os.environ.get("FAKE_CODEX_SOURCE", "cli"),
             }}})
         else:
             send({"id": request_id, "error": {"code": -32601, "message": method}})
@@ -174,7 +201,12 @@ class RelayTests(unittest.TestCase):
             clear=False,
         )
 
-    def write_transcript(self, *, include_settings: bool = True) -> None:
+    def write_transcript(
+        self,
+        *,
+        include_settings: bool = True,
+        active_profile_id: str | None = None,
+    ) -> None:
         records = []
         if include_settings:
             records.append(
@@ -192,6 +224,9 @@ class RelayTests(unittest.TestCase):
                             "network_access": False,
                         },
                         "permission_profile": {"type": "disabled"},
+                        "active_permission_profile": (
+                            {"id": active_profile_id} if active_profile_id else None
+                        ),
                         "collaboration_mode": {
                             "mode": "default",
                             "settings": {
@@ -207,27 +242,38 @@ class RelayTests(unittest.TestCase):
         records.extend(
             [
                 {
-                    "type": "event_msg",
+                    "type": "response_item",
                     "payload": {
-                        "type": "agent_message",
-                        "phase": "commentary",
-                        "message": "Completed the transport probe; source settings are confirmed.",
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "Continue the release validation"}],
                     },
                 },
                 {
-                    "type": "event_msg",
+                    "type": "response_item",
                     "payload": {
-                        "type": "agent_message",
+                        "type": "message",
+                        "role": "assistant",
                         "phase": "commentary",
-                        "message": "Constraint: keep the runtime small and do not add a new framework.",
+                        "content": [{"type": "output_text", "text": "Completed the transport probe; source settings are confirmed."}],
                     },
                 },
                 {
-                    "type": "event_msg",
+                    "type": "response_item",
                     "payload": {
-                        "type": "agent_message",
+                        "type": "message",
+                        "role": "assistant",
                         "phase": "commentary",
-                        "message": "Remaining work: run the installed smoke; targeted tests currently pass.",
+                        "content": [{"type": "output_text", "text": "Constraint: keep the runtime small and do not add a new framework."}],
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "phase": "commentary",
+                        "content": [{"type": "output_text", "text": "Remaining work: run the installed smoke; targeted tests currently pass."}],
                     },
                 },
             ]
@@ -241,8 +287,9 @@ class RelayTests(unittest.TestCase):
         self,
         session: str,
         *,
-        ratio: float,
-        event: str = "UserPromptSubmit",
+        ratio: float | None = None,
+        event: str = "PreCompact",
+        trigger: str = "auto",
         turn_id: str | None = None,
         tool_name: str | None = None,
         tool_input: dict[str, object] | None = None,
@@ -250,11 +297,14 @@ class RelayTests(unittest.TestCase):
         payload: dict[str, object] = {
             "session_id": session,
             "cwd": str(self.repo),
-            "prompt": "Continue the release validation",
             "transcript_path": str(self.transcript),
         }
+        if event == "UserPromptSubmit":
+            payload["prompt"] = "Continue the release validation"
         if turn_id is not None:
             payload["turn_id"] = turn_id
+        if event == "PreCompact":
+            payload["trigger"] = trigger
         if tool_name is not None:
             payload["tool_name"] = tool_name
         if tool_input is not None:
@@ -263,7 +313,6 @@ class RelayTests(unittest.TestCase):
             repo=self.repo,
             event=event,
             payload=payload,
-            context_used=ratio,
             codex_binary=self.fake_codex,
         )
 
@@ -293,23 +342,66 @@ class RelayTests(unittest.TestCase):
             time.sleep(0.02)
         self.fail(f"timed out waiting for {session} outcome {status}")
 
-    def test_below_equal_and_above_threshold(self) -> None:
+    def test_auto_precompact_handoffs_and_manual_compact_stays_native(self) -> None:
         with self.env():
-            self.assertEqual(self.call("below", ratio=0.299), {"continue": True})
-            equal = self.call("equal", ratio=0.30)
-            above = self.call("above", ratio=0.301)
-        self.assertEqual(equal["decision"], "block")
-        self.assertEqual(above["decision"], "block")
-        self.assertIs(equal["continue"], False)
-        self.assertEqual(len([x for x in self.log_entries() if x.get("method") == "thread/start"]), 2)
+            automatic = self.call("auto")
+            manual = self.call("manual", trigger="manual")
+        self.assertEqual(set(automatic), {"continue", "stopReason"})
+        self.assertIs(automatic["continue"], False)
+        self.assertIn("fresh successor", automatic["stopReason"])
+        self.assertEqual(manual, {"continue": True})
+        self.assertEqual(len([x for x in self.log_entries() if x.get("method") == "thread/start"]), 1)
+
+    def test_precompact_unsupported_python_includes_system_message(self) -> None:
+        unsupported_python = self.root / "python3.9"
+        unsupported_python.write_text(
+            "#!/bin/sh\n"
+            "printf '3.9\\n'\n",
+            encoding="utf-8",
+        )
+        unsupported_python.chmod(
+            unsupported_python.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+        plugin_root = Path(__file__).resolve().parents[3]
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "PLUGIN_ROOT": str(plugin_root),
+                "RELAY_PYTHON": str(unsupported_python),
+                "ROOT": str(self.repo),
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(plugin_root / "hooks" / "relay_hook.sh"), "PreCompact"],
+            cwd=self.repo,
+            env=environment,
+            input='{"trigger":"auto"}\n',
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        response = json.loads(result.stdout)
+        self.assertEqual(
+            response["systemMessage"],
+            "Relay requires Python 3.10 or newer. Native Codex compaction will continue.",
+        )
+
+    def test_no_goal_and_terminal_goal_allow_native_compaction(self) -> None:
+        with self.env(), mock.patch.dict(os.environ, {"FAKE_CODEX_NO_GOAL": "1"}):
+            self.assertEqual(self.call("no-goal"), {"continue": True})
+        with self.env(), mock.patch.dict(os.environ, {"FAKE_CODEX_MISSING_GOAL_STATUS": "1"}):
+            self.assertEqual(self.call("unknown-goal-status"), {"continue": True})
+        with self.env(), mock.patch.dict(os.environ, {"FAKE_CODEX_GOAL_STATUS": "complete"}):
+            self.assertEqual(self.call("terminal"), {"continue": True})
+        self.assertFalse(any(x.get("method") == "thread/start" for x in self.log_entries()))
 
     def test_duplicate_event_is_idempotent_and_quiesces_pretool(self) -> None:
         with self.env():
             first = self.call("same", ratio=0.31)
             second = self.call("same", ratio=0.31)
             pretool = self.call("same", ratio=0.01, event="PreToolUse")
-        self.assertEqual(first["decision"], "block")
-        self.assertEqual(second["decision"], "block")
+        self.assertIs(first["continue"], False)
+        self.assertIs(second["continue"], False)
         self.assertEqual(pretool["hookSpecificOutput"]["permissionDecision"], "deny")
         starts = [x for x in self.log_entries() if x.get("method") == "thread/start"]
         self.assertEqual(len(starts), 1)
@@ -325,7 +417,7 @@ class RelayTests(unittest.TestCase):
                 tool_name="Goal",
                 tool_input={"action": "cancel"},
             )
-        self.assertEqual(first["decision"], "block")
+        self.assertIs(first["continue"], False)
         self.assertEqual(control, {})
         self.assertNotIn("permissionDecision", control.get("hookSpecificOutput", {}))
         self.assertEqual(
@@ -343,7 +435,7 @@ class RelayTests(unittest.TestCase):
                 tool_name="functions.update_goal",
                 tool_input={"status": "blocked"},
             )
-        self.assertEqual(first["decision"], "block")
+        self.assertIs(first["continue"], False)
         self.assertEqual(control, {})
         self.assertNotIn("permissionDecision", control.get("hookSpecificOutput", {}))
         self.assertEqual(
@@ -407,44 +499,6 @@ class RelayTests(unittest.TestCase):
             2,
         )
 
-    def test_no_progress_circuit_breaker_ignores_increasing_goal_tokens(self) -> None:
-        with self.env(), mock.patch.dict(
-            os.environ,
-            {"RELAY_NO_PROGRESS_LIMIT": "2"},
-            clear=False,
-        ):
-            with mock.patch.dict(os.environ, {"FAKE_CODEX_TOKENS_USED": "100"}):
-                self.call("A", ratio=0.31)
-            self.outcome("A", status="completed")
-            b = self.state("A")["destination_thread_id"]
-
-            with mock.patch.dict(os.environ, {"FAKE_CODEX_TOKENS_USED": "200"}):
-                self.call(b, ratio=0.31)
-            self.outcome(b, status="completed")
-            c = self.state(b)["destination_thread_id"]
-
-            with mock.patch.dict(os.environ, {"FAKE_CODEX_TOKENS_USED": "300"}):
-                first_breaker_call = self.call(c, ratio=0.31)
-            starts_at_breaker = len(
-                [x for x in self.log_entries() if x.get("method") == "thread/start"]
-            )
-            state = self.state(c)
-
-            with mock.patch.dict(os.environ, {"FAKE_CODEX_TOKENS_USED": "400"}):
-                after_breaker_call = self.call(c, ratio=0.31)
-            starts_after_breaker = len(
-                [x for x in self.log_entries() if x.get("method") == "thread/start"]
-            )
-
-        self.assertEqual(first_breaker_call, {"continue": True})
-        self.assertEqual(after_breaker_call, {"continue": True})
-        self.assertEqual(state["status"], "circuit_breaker")
-        self.assertEqual(state["circuit_breaker"], "repeated_no_progress")
-        self.assertEqual(state["no_progress_count"], 2)
-        self.assertEqual(state["goal_status"], "blocked")
-        self.assertEqual(starts_at_breaker, 2)
-        self.assertEqual(starts_after_breaker, 2)
-
     def test_reused_destination_id_fails_open_without_quiescing_source(self) -> None:
         with self.env(), mock.patch.dict(
             os.environ,
@@ -466,21 +520,21 @@ class RelayTests(unittest.TestCase):
             second = self.call(b, ratio=0.31, turn_id="turn-B")
             self.outcome(b, status="completed")
             c = self.state(b)["destination_thread_id"]
-        self.assertEqual(first["decision"], "block")
-        self.assertEqual(second["decision"], "block")
+        self.assertIs(first["continue"], False)
+        self.assertIs(second["continue"], False)
         self.assertNotEqual(b, c)
         entries = self.log_entries()
         starts = [item for item in entries if item.get("method") == "thread/start"]
         self.assertEqual(len(starts), 2)
         goal_sets = [item for item in entries if item.get("method") == "thread/goal/set"]
-        self.assertEqual(len(goal_sets), 2)
+        self.assertEqual(len(goal_sets), 4)
         self.assertEqual(
-            {item["params"]["objective"] for item in goal_sets},
+            {item["params"]["objective"] for item in goal_sets if "objective" in item["params"]},
             {"Finish the Relay release"},
         )
         self.assertEqual(
             [item["params"]["status"] for item in goal_sets],
-            ["active", "active"],
+            ["paused", "active", "paused", "active"],
         )
         turns = [item for item in entries if item.get("method") == "turn/start"]
         self.assertEqual(len(turns), 2)
@@ -490,7 +544,11 @@ class RelayTests(unittest.TestCase):
             ["Relay II: Original Relay Goal", "Relay III: Original Relay Goal"],
         )
         methods = [item.get("method") for item in entries]
-        self.assertLess(methods.index("thread/goal/set"), methods.index("turn/start"))
+        goal_indices = [i for i, method in enumerate(methods) if method == "thread/goal/set"]
+        turn_indices = [i for i, method in enumerate(methods) if method == "turn/start"]
+        for offset, turn_index in enumerate(turn_indices):
+            self.assertLess(goal_indices[offset * 2], turn_index)
+            self.assertLess(turn_index, goal_indices[offset * 2 + 1])
         self.assertTrue(all("thread/fork" not in item.get("method", "") for item in entries))
         for session in ("A", b):
             state = self.state(session)
@@ -509,106 +567,29 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(self.state("A")["destination_relay_sequence"], 2)
         self.assertEqual(self.state(b)["destination_relay_sequence"], 3)
 
-    def test_desktop_acknowledgement_requires_exact_visible_thread_proof(self) -> None:
-        presenter = self.root / "desktop-presenter"
-        presenter.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json, os\n"
-            "from pathlib import Path\n"
-            "payload = json.load(__import__('sys').stdin)\n"
-            "Path(os.environ['RELAY_DESKTOP_ACK_PATH']).write_text(json.dumps({\n"
-            "  'presented': True, 'selected_thread_id': payload['thread_id'],\n"
-            "  'thread_id': payload['thread_id'], 'turn_id': payload['turn_id'],\n"
-            "  'chain_id': payload['chain_id'], 'relay_sequence': payload['relay_sequence'],\n"
-            "  'source_thread_id': payload['source_thread_id']}))\n",
-            encoding="utf-8",
-        )
-        presenter.chmod(presenter.stat().st_mode | stat.S_IXUSR)
-        with self.env(), mock.patch.dict(
-            os.environ,
-            {
-                "RELAY_DESKTOP_HANDOFF": "1",
-                "RELAY_DESKTOP_PRESENTATION_COMMAND": str(presenter),
-                "RELAY_DESKTOP_PRESENTATION_TIMEOUT": "2",
-            },
-            clear=False,
-        ):
-            response = self.call("desktop", ratio=0.31)
-            outcome = self.outcome("desktop", status="completed")
-        self.assertEqual(response["decision"], "block")
-        self.assertTrue(outcome["presentation_verified"])
-        state = self.state("desktop")
-        self.assertEqual(state["presentation_mode"], "desktop")
-        self.assertEqual(state["presentation_status"], "presented")
+    def test_app_server_surface_fails_open_without_supported_presentation(self) -> None:
+        for source in ("vscode", "unknown"):
+            with self.subTest(source=source), self.env(), mock.patch.dict(
+                os.environ,
+                {"FAKE_CODEX_SOURCE": source},
+            ):
+                response = self.call(f"surface-{source}")
+            self.assertEqual(response, {"continue": True})
+        self.assertFalse(any(item.get("method") == "thread/start" for item in self.log_entries()))
+        for source in ("vscode", "unknown"):
+            state_path, _ = relay._state_paths(self.repo, f"surface-{source}")
+            self.assertFalse(state_path.exists())
 
-    def test_desktop_without_host_presentation_proof_fails_open(self) -> None:
+    def test_mismatched_source_thread_metadata_fails_open(self) -> None:
         with self.env(), mock.patch.dict(
             os.environ,
-            {
-                "RELAY_DESKTOP_HANDOFF": "1",
-                "RELAY_DESKTOP_PRESENTATION_COMMAND": "",
-                "RELAY_DESKTOP_PRESENTATION_ACK": "",
-                "RELAY_DESKTOP_PRESENTATION_TIMEOUT": "0.2",
-            },
-            clear=False,
+            {"FAKE_CODEX_BAD_THREAD_READ": "1"},
         ):
-            response = self.call("desktop-unverified", ratio=0.31)
-            state = self.state("desktop-unverified")
+            response = self.call("mismatched-source")
         self.assertEqual(response, {"continue": True})
-        self.assertEqual(state["status"], "failed")
-        self.assertIn("desktop_focus_unsupported", state["error"])
-        self.assertFalse("destination_thread_id" in state)
+        self.assertFalse(any(item.get("method") == "thread/start" for item in self.log_entries()))
 
-    def test_desktop_a_to_b_to_c_records_visible_ids_and_names(self) -> None:
-        presenter = self.root / "desktop-presenter-chain"
-        presenter.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json, os, sys\n"
-            "from pathlib import Path\n"
-            "payload = json.load(sys.stdin)\n"
-            "Path(os.environ['RELAY_DESKTOP_ACK_PATH']).write_text(json.dumps({\n"
-            "  'presented': True, 'selected_thread_id': payload['thread_id'],\n"
-            "  'thread_id': payload['thread_id'], 'turn_id': payload['turn_id'],\n"
-            "  'chain_id': payload['chain_id'], 'relay_sequence': payload['relay_sequence'],\n"
-            "  'source_thread_id': payload['source_thread_id'],\n"
-            "  'thread_name': payload['thread_name']}))\n",
-            encoding="utf-8",
-        )
-        presenter.chmod(presenter.stat().st_mode | stat.S_IXUSR)
-        with self.env(), mock.patch.dict(
-            os.environ,
-            {
-                "RELAY_DESKTOP_HANDOFF": "1",
-                "RELAY_DESKTOP_PRESENTATION_COMMAND": str(presenter),
-                "RELAY_DESKTOP_PRESENTATION_TIMEOUT": "2",
-            },
-            clear=False,
-        ):
-            first = self.call("desktop-A", ratio=0.31)
-            self.outcome("desktop-A", status="completed")
-            b = self.state("desktop-A")["destination_thread_id"]
-            second = self.call(b, ratio=0.31)
-            self.outcome(b, status="completed")
-            c = self.state(b)["destination_thread_id"]
-        self.assertEqual(first["decision"], "block")
-        self.assertEqual(second["decision"], "block")
-        self.assertNotEqual("desktop-A", b)
-        self.assertNotEqual(b, c)
-        self.assertEqual(self.state("desktop-A")["presentation_status"], "presented")
-        self.assertEqual(self.state(b)["presentation_status"], "presented")
-        self.assertEqual(
-            self.state("desktop-A")["destination_thread_name"],
-            "Relay II: Original Relay Goal",
-        )
-        self.assertEqual(
-            self.state(b)["destination_thread_name"],
-            "Relay III: Original Relay Goal",
-        )
-        self.assertEqual(self.state("desktop-A")["relay_chain_id"], self.state(b)["relay_chain_id"])
-        self.assertEqual(self.state("desktop-A")["destination_thread_id"], b)
-        self.assertEqual(self.state(b)["destination_thread_id"], c)
-
-    def test_forced_failure_circuit_breaker_blocks_goal_and_cleans_chain(self) -> None:
+    def test_forced_failure_circuit_breaker_fails_open_without_blocking_goal(self) -> None:
         with self.env(), mock.patch.dict(
             os.environ,
             {"RELAY_FAILURE_LIMIT": "2"},
@@ -625,7 +606,7 @@ class RelayTests(unittest.TestCase):
         state = self.state("forced")
         self.assertEqual(state["status"], "circuit_breaker")
         self.assertEqual(state["circuit_breaker"], "repeated_handoff_failure")
-        self.assertEqual(state["goal_status"], "blocked")
+        self.assertNotIn("goal_status", state)
         self.assertEqual(state["handoff_failure_count"], 2)
         self.assertFalse(any(item.get("method") == "thread/start" for item in self.log_entries()))
 
@@ -676,6 +657,336 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(response, {})
         stop.assert_not_called()
         self.assertEqual(self.state("unrelated")["status"], "running")
+
+    def test_partial_worker_cleanup_never_claims_a_live_worker_cancelled(self) -> None:
+        chain_id = "partial-cleanup"
+        for session, pid in (("cleanup-a", 111), ("cleanup-b", 222)):
+            state_path, _ = relay._state_paths(self.repo, session)
+            outcome_path = state_path.with_suffix(".outcome.json")
+            relay._write_state(outcome_path, {"status": "running", "worker_pid": pid})
+            relay._write_state(
+                state_path,
+                {
+                    "status": "running",
+                    "source_session_id": session,
+                    "destination_thread_id": f"destination-{session}",
+                    "destination_turn_id": f"turn-{session}",
+                    "worker_pid": pid,
+                    "outcome_path": str(outcome_path),
+                    "relay_chain_id": chain_id,
+                },
+            )
+        with mock.patch.object(relay, "_worker_pids", return_value={111, 222}), mock.patch.object(
+            relay,
+            "stop_worker_pid",
+            side_effect=[True, False],
+        ), mock.patch.object(relay, "_pid_is_alive", return_value=True):
+            result = relay.cleanup_workers(self.repo, chain_id=chain_id)
+        self.assertEqual(result, {"cleaned": [111], "skipped": [222]})
+        self.assertEqual(self.state("cleanup-a")["status"], "cancelled")
+        self.assertEqual(self.state("cleanup-a")["cleanup"], "worker_terminated")
+        self.assertEqual(self.state("cleanup-b")["status"], "cleanup_failed")
+        self.assertEqual(self.state("cleanup-b")["cleanup"], "worker_still_live")
+        child_state = self.state("cleanup-b")
+        child_outcome = json.loads(Path(child_state["outcome_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(child_outcome["status"], "running")
+
+    def test_mixed_worker_cleanup_preserves_completed_outcome(self) -> None:
+        chain_id = "mixed-cleanup"
+        completed_state_path, _ = relay._state_paths(self.repo, "mixed-completed")
+        completed_outcome_path = completed_state_path.with_suffix(".outcome.json")
+        relay._write_state(
+            completed_outcome_path,
+            {
+                "status": "completed",
+                "worker_pid": 333,
+                "thread_id": "destination-mixed-completed",
+                "turn_id": "turn-mixed-completed",
+            },
+        )
+        relay._write_state(
+            completed_state_path,
+            {
+                "status": "running",
+                "source_session_id": "mixed-completed",
+                "destination_thread_id": "destination-mixed-completed",
+                "destination_turn_id": "turn-mixed-completed",
+                "worker_pid": 333,
+                "outcome_path": str(completed_outcome_path),
+                "relay_chain_id": chain_id,
+            },
+        )
+
+        running_state_path, _ = relay._state_paths(self.repo, "mixed-running")
+        running_outcome_path = running_state_path.with_suffix(".outcome.json")
+        relay._write_state(
+            running_outcome_path,
+            {"status": "running", "worker_pid": 444},
+        )
+        relay._write_state(
+            running_state_path,
+            {
+                "status": "running",
+                "source_session_id": "mixed-running",
+                "destination_thread_id": "destination-mixed-running",
+                "destination_turn_id": "turn-mixed-running",
+                "worker_pid": 444,
+                "outcome_path": str(running_outcome_path),
+                "relay_chain_id": chain_id,
+            },
+        )
+
+        with mock.patch.object(relay, "_worker_pids", return_value={333, 444}), mock.patch.object(
+            relay,
+            "stop_worker_pid",
+            side_effect=[True, False],
+        ), mock.patch.object(relay, "_pid_is_alive", return_value=True):
+            result = relay.cleanup_workers(self.repo, chain_id=chain_id)
+
+        self.assertEqual(result, {"cleaned": [333], "skipped": [444]})
+        self.assertEqual(self.state("mixed-completed")["status"], "cancelled")
+        completed_outcome = json.loads(completed_outcome_path.read_text(encoding="utf-8"))
+        self.assertEqual(completed_outcome["status"], "completed")
+        self.assertEqual(self.state("mixed-running")["status"], "cleanup_failed")
+        running_outcome = json.loads(running_outcome_path.read_text(encoding="utf-8"))
+        self.assertEqual(running_outcome["status"], "running")
+
+    def test_post_ack_state_persistence_failure_stops_destination_worker(self) -> None:
+        real_write = relay._write_state
+
+        def fail_running_state(path: Path, payload: dict[str, object]) -> None:
+            if payload.get("status") == "running" and "destination_thread_id" in payload:
+                raise OSError("simulated state persistence failure")
+            real_write(path, payload)
+
+        with self.env(), mock.patch.object(
+            relay,
+            "launch",
+            return_value=codex_app_transport.LaunchResult(
+                True,
+                "destination",
+                "turn-destination",
+                worker_pid=1234,
+            ),
+        ), mock.patch.object(relay, "stop_worker_pid", return_value=True) as stop, mock.patch.object(
+            relay,
+            "_write_state",
+            side_effect=fail_running_state,
+        ):
+            response = self.call("persist-failure")
+        self.assertEqual(response, {"continue": True})
+        stop.assert_called_once_with(1234, repo=self.repo.resolve())
+        state = self.state("persist-failure")
+        self.assertEqual(state["status"], "failed")
+        self.assertIn("post-ack Relay persistence failed", state["error"])
+
+    def test_post_ack_persistence_failure_falls_back_to_group_cleanup(self) -> None:
+        real_write = relay._write_state
+
+        def fail_running_state(path: Path, payload: dict[str, object]) -> None:
+            if payload.get("status") == "running" and "destination_thread_id" in payload:
+                raise OSError("simulated state persistence failure")
+            real_write(path, payload)
+
+        with self.env(), mock.patch.object(
+            relay,
+            "launch",
+            return_value=codex_app_transport.LaunchResult(
+                True,
+                "destination",
+                "turn-destination",
+                worker_pid=2345,
+            ),
+        ), mock.patch.object(relay, "stop_worker_pid", return_value=False) as stop, mock.patch.object(
+            relay,
+            "stop_worker_group",
+            return_value=True,
+        ) as group, mock.patch.object(relay, "_write_state", side_effect=fail_running_state):
+            response = self.call("persist-group-fallback")
+        self.assertEqual(response, {"continue": True})
+        stop.assert_called_once_with(2345, repo=self.repo.resolve())
+        state_path, _ = relay._state_paths(self.repo.resolve(), "persist-group-fallback")
+        group.assert_called_once_with(
+            2345,
+            repo=self.repo.resolve(),
+            outcome_path=state_path.with_suffix(".outcome.json"),
+        )
+        state = self.state("persist-group-fallback")
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["worker_pid"], 2345)
+        self.assertIn("post-ack Relay persistence failed", state["error"])
+
+    def test_post_ack_persistence_failure_preserves_completed_destination(self) -> None:
+        real_write = relay._write_state
+        failed_writes = 0
+
+        def fail_first_running_states(path: Path, payload: dict[str, object]) -> None:
+            nonlocal failed_writes
+            if payload.get("status") == "running" and "destination_thread_id" in payload and failed_writes < 2:
+                failed_writes += 1
+                raise OSError("simulated state persistence failure")
+            real_write(path, payload)
+
+        def acknowledge(config: codex_app_transport.LaunchConfig) -> codex_app_transport.LaunchResult:
+            assert config.outcome_path is not None
+            real_write(
+                config.outcome_path,
+                {
+                    "status": "completed",
+                    "worker_pid": 3456,
+                    "thread_id": "destination-completed",
+                    "turn_id": "turn-completed",
+                },
+            )
+            return codex_app_transport.LaunchResult(
+                True,
+                "destination-completed",
+                "turn-completed",
+                worker_pid=3456,
+            )
+
+        with self.env(), mock.patch.object(
+            relay,
+            "launch",
+            side_effect=acknowledge,
+        ) as launch_mock, mock.patch.object(
+            relay,
+            "stop_worker_pid",
+            return_value=True,
+        ), mock.patch.object(relay, "stop_worker_group", return_value=False), mock.patch.object(
+            relay,
+            "_write_state",
+            side_effect=fail_first_running_states,
+        ):
+            first = self.call("persist-completed")
+            second = self.call("persist-completed")
+        self.assertEqual(first, {"continue": True})
+        self.assertIs(second["continue"], False)
+        self.assertEqual(launch_mock.call_count, 1)
+        state = self.state("persist-completed")
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(state["destination_thread_id"], "destination-completed")
+        self.assertEqual(state["destination_turn_id"], "turn-completed")
+
+    def test_foreign_live_worker_state_fails_open_without_quiescing(self) -> None:
+        foreign = subprocess.Popen(["sleep", "5"])
+        try:
+            state_path, _ = relay._state_paths(self.repo, "foreign")
+            outcome_path = state_path.with_suffix(".outcome.json")
+            relay._write_state(
+                outcome_path,
+                {"status": "running", "worker_pid": foreign.pid},
+            )
+            relay._write_state(
+                state_path,
+                {
+                    "status": "running",
+                    "source_session_id": "foreign",
+                    "cwd": str(self.repo.resolve()),
+                    "destination_thread_id": "foreign-destination",
+                    "destination_turn_id": "foreign-turn",
+                    "relay_chain_id": "foreign-chain",
+                    "relay_sequence": 1,
+                    "destination_relay_sequence": 2,
+                    "worker_pid": foreign.pid,
+                    "outcome_path": str(outcome_path),
+                },
+            )
+            with self.env():
+                response = self.call("foreign", event="UserPromptSubmit")
+            self.assertEqual(response, {"continue": True})
+            self.assertEqual(self.state("foreign")["status"], "cleanup_failed")
+            self.assertIn("not a live Relay worker", self.state("foreign")["error"])
+            relay._write_state(outcome_path, {"status": "cancelled", "worker_pid": foreign.pid})
+        finally:
+            foreign.terminate()
+            foreign.wait(timeout=5)
+
+    def test_foreign_live_completed_worker_state_fails_open(self) -> None:
+        foreign = subprocess.Popen(["sleep", "5"])
+        try:
+            state_path, _ = relay._state_paths(self.repo, "foreign-completed")
+            outcome_path = state_path.with_suffix(".outcome.json")
+            relay._write_state(
+                outcome_path,
+                {
+                    "status": "completed",
+                    "worker_pid": foreign.pid,
+                    "thread_id": "foreign-completed-destination",
+                    "turn_id": "foreign-completed-turn",
+                },
+            )
+            relay._write_state(
+                state_path,
+                {
+                    "status": "running",
+                    "source_session_id": "foreign-completed",
+                    "cwd": str(self.repo.resolve()),
+                    "destination_thread_id": "foreign-completed-destination",
+                    "destination_turn_id": "foreign-completed-turn",
+                    "relay_chain_id": "foreign-completed-chain",
+                    "relay_sequence": 1,
+                    "destination_relay_sequence": 2,
+                    "worker_pid": foreign.pid,
+                    "outcome_path": str(outcome_path),
+                },
+            )
+            with self.env():
+                response = self.call("foreign-completed", event="UserPromptSubmit")
+            self.assertEqual(response, {"continue": True})
+            self.assertEqual(self.state("foreign-completed")["status"], "cleanup_failed")
+            self.assertIn("not a live Relay worker", self.state("foreign-completed")["error"])
+        finally:
+            foreign.terminate()
+            foreign.wait(timeout=5)
+
+    def test_cleanup_failure_blocks_retry_until_worker_is_stopped(self) -> None:
+        foreign = subprocess.Popen(["sleep", "5"])
+        try:
+            self._assert_cleanup_failure_blocks_retry(foreign.pid)
+        finally:
+            foreign.terminate()
+            foreign.wait(timeout=5)
+
+    def _assert_cleanup_failure_blocks_retry(self, worker_pid: int) -> None:
+        state_path, _ = relay._state_paths(self.repo, "cleanup-blocked")
+        outcome_path = state_path.with_suffix(".outcome.json")
+        relay._write_state(
+            outcome_path,
+            {"status": "running", "worker_pid": worker_pid},
+        )
+        relay._write_state(
+            state_path,
+            {
+                "status": "running",
+                "source_session_id": "cleanup-blocked",
+                "cwd": str(self.repo.resolve()),
+                "destination_thread_id": "cleanup-blocked-destination",
+                "destination_turn_id": "cleanup-blocked-turn",
+                "relay_chain_id": "cleanup-blocked-chain",
+                "relay_sequence": 1,
+                "destination_relay_sequence": 2,
+                "worker_pid": worker_pid,
+                "outcome_path": str(outcome_path),
+            },
+        )
+        with self.env(), mock.patch.object(
+            relay,
+            "_worker_pids",
+            return_value={worker_pid},
+        ), mock.patch.object(relay, "stop_worker_pid", return_value=False) as stop:
+            first = self.call("cleanup-blocked")
+            second = self.call("cleanup-blocked")
+        self.assertEqual(first, {"continue": True})
+        self.assertEqual(second, {"continue": True})
+        self.assertEqual(stop.call_count, 2)
+        self.assertEqual(self.state("cleanup-blocked")["status"], "cleanup_failed")
+        self.assertEqual(
+            json.loads(outcome_path.read_text(encoding="utf-8"))["status"],
+            "running",
+        )
+        self.assertFalse(any(item.get("method") == "thread/start" for item in self.log_entries()))
+        relay._write_state(outcome_path, {"status": "cancelled", "worker_pid": worker_pid})
 
     def test_destination_session_end_cleans_parent_chain_worker(self) -> None:
         state_path, _ = relay._state_paths(self.repo, "source-A")
@@ -730,8 +1041,6 @@ class RelayTests(unittest.TestCase):
                     "outcome_path": str(outcome),
                     "response_timeout": 30,
                     "turn_timeout": 30,
-                    "presentation_mode": "headless",
-                    "presentation_timeout": 1,
                 }
             ),
             encoding="utf-8",
@@ -778,6 +1087,151 @@ class RelayTests(unittest.TestCase):
                     pass
                 worker.wait()
 
+    def test_orphaned_worker_group_is_killed_after_leader_exit(self) -> None:
+        fake_server = self.root / "relay-launcher"
+        native_server = self.root / "vendor-codex"
+        child_pid_path = self.root / "orphan-child.pid"
+        native_server.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "import pathlib\n"
+            "import time\n"
+            "pathlib.Path(os.environ['FAKE_CHILD_PID']).write_text(str(os.getpid()), encoding='utf-8')\n"
+            "for _line in __import__('sys').stdin:\n"
+            "    time.sleep(60)\n",
+            encoding="utf-8",
+        )
+        native_server.chmod(native_server.stat().st_mode | stat.S_IXUSR)
+        fake_server.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "import sys\n"
+            "os.execv(os.environ['NATIVE_CODEX'], [os.environ['NATIVE_CODEX'], *sys.argv[1:]])\n",
+            encoding="utf-8",
+        )
+        fake_server.chmod(fake_server.stat().st_mode | stat.S_IXUSR)
+        cleanup_repo = self.repo.resolve()
+        request = cleanup_repo / ".omx/state/relay/.request-orphan-cleanup.json"
+        outcome = cleanup_repo / ".omx/state/relay/orphan-cleanup.outcome.json"
+        state_path, _ = relay._state_paths(cleanup_repo, "orphan-cleanup")
+        request.parent.mkdir(parents=True, exist_ok=True)
+        request.write_text(
+            json.dumps(
+                {
+                    "cwd": str(self.repo.resolve()),
+                    "continuation_prompt": "continue",
+                    "codex_binary": str(fake_server),
+                    "goal_objective": "Finish cleanup",
+                    "goal_status": "active",
+                    "goal_token_budget": None,
+                    "settings": {},
+                    "outcome_path": str(outcome),
+                    "response_timeout": 30,
+                    "turn_timeout": 30,
+                }
+            ),
+            encoding="utf-8",
+        )
+        read_fd, write_fd = os.pipe()
+        worker_env = os.environ.copy()
+        worker_env["FAKE_CHILD_PID"] = str(child_pid_path)
+        worker_env["NATIVE_CODEX"] = str(native_server)
+        worker = subprocess.Popen(
+            [
+                relay.sys.executable,
+                str(Path(relay.__file__).with_name("codex_app_transport.py")),
+                "--worker-request",
+                str(request),
+                "--ack-fd",
+                str(write_fd),
+            ],
+            cwd=cleanup_repo,
+            env=worker_env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            pass_fds=(write_fd,),
+            start_new_session=True,
+        )
+        os.close(write_fd)
+        os.close(read_fd)
+        relay._write_state(
+            state_path,
+            {
+                "status": "running",
+                "source_session_id": "orphan-cleanup",
+                "worker_pid": worker.pid,
+                "outcome_path": str(outcome),
+            },
+        )
+        child_pid: int | None = None
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not child_pid_path.exists():
+                time.sleep(0.02)
+            child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+            self.assertTrue(relay._pid_is_alive(child_pid))
+            os.kill(worker.pid, signal.SIGKILL)
+            worker.wait(timeout=5)
+            result = relay.cleanup_workers(cleanup_repo)
+            self.assertIn(worker.pid, result["cleaned"])
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and relay._pid_is_alive(child_pid):
+                time.sleep(0.02)
+            self.assertFalse(relay._pid_is_alive(child_pid))
+            self.assertEqual(json.loads(outcome.read_text(encoding="utf-8"))["status"], "cancelled")
+        finally:
+            if worker.poll() is None:
+                try:
+                    os.kill(worker.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                worker.wait()
+            if child_pid is not None and relay._pid_is_alive(child_pid):
+                try:
+                    os.killpg(worker.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_pre_ack_leader_exit_kills_orphaned_app_server(self) -> None:
+        fake_server = self.root / "preack-codex"
+        child_pid_path = self.root / "preack-child.pid"
+        fake_server.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "import pathlib\n"
+            "import signal\n"
+            "import time\n"
+            "pathlib.Path(os.environ['PREACK_CHILD_PID']).write_text(str(os.getpid()), encoding='utf-8')\n"
+            "os.kill(os.getppid(), signal.SIGKILL)\n"
+            "time.sleep(60)\n",
+            encoding="utf-8",
+        )
+        fake_server.chmod(fake_server.stat().st_mode | stat.S_IXUSR)
+        outcome_path = self.repo / ".omx/state/relay/preack.outcome.json"
+        config = codex_app_transport.LaunchConfig(
+            cwd=self.repo.resolve(),
+            continuation_prompt="continue",
+            codex_binary=fake_server.resolve(),
+            outcome_path=outcome_path,
+            response_timeout=2,
+            turn_timeout=2,
+        )
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"PREACK_CHILD_PID": str(child_pid_path)},
+            clear=False,
+        ):
+            result = codex_app_transport.launch(config, acknowledgement_timeout=2)
+        self.assertFalse(result.acknowledged)
+        self.assertIn("worker_closed_acknowledgement", result.error or "")
+        child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and relay._pid_is_alive(child_pid):
+            time.sleep(0.02)
+        self.assertFalse(relay._pid_is_alive(child_pid))
+        relay._write_state(outcome_path, {"status": "cancelled", "worker_pid": result.worker_pid})
+
     def test_failed_handoff_cleanup_stops_recorded_worker_before_retry(self) -> None:
         state_path, _ = relay._state_paths(self.repo, "failed-cleanup")
         outcome_path = state_path.with_suffix(".outcome.json")
@@ -816,11 +1270,21 @@ class RelayTests(unittest.TestCase):
                     "status": "running",
                     "source_session_id": destination_b,
                     "destination_thread_id": "destination-C",
+                    "destination_turn_id": "turn-destination-C",
+                    "relay_chain_id": state["relay_chain_id"],
+                    "relay_sequence": 2,
+                    "destination_relay_sequence": 3,
+                    "worker_pid": 999,
+                    "outcome_path": str(b_state_path.with_suffix(".outcome.json")),
                 },
+            )
+            relay._write_state(
+                b_state_path.with_suffix(".outcome.json"),
+                {"status": "running", "worker_pid": 999},
             )
             outcome = self.outcome("source-A", status="completed")
 
-        self.assertEqual(response["decision"], "block")
+        self.assertIs(response["continue"], False)
         self.assertEqual(state["status"], "running")
         self.assertEqual(outcome["thread_id"], destination_b)
         self.assertEqual(outcome["turn_id"], state["destination_turn_id"])
@@ -830,7 +1294,7 @@ class RelayTests(unittest.TestCase):
         ]
         self.assertEqual(
             [entry["params"].get("status") for entry in goal_sets],
-            ["active"],
+            ["paused", "active"],
         )
         self.assertFalse(
             any(entry.get("method") == "turn/interrupt" for entry in entries)
@@ -927,7 +1391,7 @@ class RelayTests(unittest.TestCase):
             timeout=0.1,
         )
 
-    def test_circuit_breaker_blocks_before_cleaning_other_chain_workers(self) -> None:
+    def test_circuit_breaker_opens_before_cleaning_other_chain_workers(self) -> None:
         events: list[str] = []
         chain = {
             "chain_id": "relay-order-test",
@@ -937,10 +1401,6 @@ class RelayTests(unittest.TestCase):
             "original_title": "Original Relay Goal",
         }
         with mock.patch.object(
-            relay,
-            "set_thread_goal_status",
-            side_effect=lambda **_: events.append("blocked"),
-        ), mock.patch.object(
             relay,
             "cleanup_workers",
             side_effect=lambda *args, **kwargs: events.append("cleanup"),
@@ -952,21 +1412,18 @@ class RelayTests(unittest.TestCase):
                 objective="Finish the Relay release",
                 chain=chain,
                 files="none reported",
-                ratio=0.31,
-                threshold=0.30,
                 progress_fingerprint="progress",
                 no_progress_count=3,
                 failure_count=0,
                 failure="repeated observations with no progress marker change",
-                codex_binary=self.fake_codex,
             )
-        self.assertEqual(events, ["blocked", "cleanup"])
+        self.assertEqual(events, ["cleanup"])
         cleanup.assert_called_once_with(
             self.repo,
             chain_id="relay-order-test",
             protect_destination_session_id="C",
         )
-        self.assertEqual(self.state("C")["goal_status"], "blocked")
+        self.assertNotIn("goal_status", self.state("C"))
 
     def test_chain_cleanup_protects_current_destination_worker(self) -> None:
         chain_id = "relay-protected-worker-test"
@@ -1032,6 +1489,80 @@ class RelayTests(unittest.TestCase):
             "default",
         )
 
+    def test_preserves_named_permission_profile(self) -> None:
+        self.write_transcript(active_profile_id=":workspace")
+        with self.env():
+            response = self.call("profile")
+            self.outcome("profile", status="completed")
+        self.assertIs(response["continue"], False)
+        starts = [item for item in self.log_entries() if item.get("method") == "thread/start"]
+        turns = [item for item in self.log_entries() if item.get("method") == "turn/start"]
+        self.assertEqual(starts[-1]["params"]["permissions"], ":workspace")
+        self.assertNotIn("sandbox", starts[-1]["params"])
+        self.assertEqual(turns[-1]["params"]["permissions"], ":workspace")
+        self.assertNotIn("sandboxPolicy", turns[-1]["params"])
+
+    def test_missing_sandbox_and_protocol_stage_failures_fail_open(self) -> None:
+        for session, variable in (
+            ("thread-start-error", "FAKE_CODEX_THREAD_START_ERROR"),
+            ("goal-set-error", "FAKE_CODEX_GOAL_SET_ERROR"),
+            ("turn-start-error", "FAKE_CODEX_TURN_START_ERROR"),
+            ("missing-sandbox", "FAKE_CODEX_MISSING_SANDBOX"),
+            ("destination-read-error", "FAKE_CODEX_BAD_THREAD_READ"),
+        ):
+            with self.subTest(stage=variable), self.env(), mock.patch.dict(
+                os.environ,
+                {variable: "1"},
+            ):
+                self.assertEqual(self.call(session), {"continue": True})
+            state_path, _ = relay._state_paths(self.repo, session)
+            if variable == "FAKE_CODEX_BAD_THREAD_READ":
+                self.assertFalse(state_path.exists())
+            else:
+                self.assertEqual(self.state(session)["status"], "failed")
+                self.assertNotIn("destination_thread_id", self.state(session))
+
+    def test_stale_running_state_does_not_quiesce_source(self) -> None:
+        state_path, _ = relay._state_paths(self.repo, "stale")
+        relay._write_state(
+            state_path,
+            {
+                "status": "running",
+                "source_session_id": "stale",
+                "cwd": str(self.repo.resolve()),
+                "destination_thread_id": "ghost",
+            },
+        )
+        with self.env():
+            guard = self.call("stale", event="UserPromptSubmit")
+            retry = self.call("stale")
+        self.assertEqual(guard, {"continue": True})
+        self.assertIs(retry["continue"], False)
+        self.assertNotEqual(self.state("stale")["destination_thread_id"], "ghost")
+
+    def test_completed_outcome_without_full_running_evidence_fails_open(self) -> None:
+        state_path, _ = relay._state_paths(self.repo, "stale-complete")
+        outcome_path = state_path.with_suffix(".outcome.json")
+        relay._write_state(
+            outcome_path,
+            {"status": "completed", "thread_id": "ghost", "turn_id": "turn-ghost"},
+        )
+        relay._write_state(
+            state_path,
+            {
+                "status": "running",
+                "source_session_id": "stale-complete",
+                "cwd": str(self.repo.resolve()),
+                "destination_thread_id": "ghost",
+                "destination_turn_id": "turn-ghost",
+                "outcome_path": str(outcome_path),
+            },
+        )
+        with self.env():
+            response = self.call("stale-complete", event="UserPromptSubmit")
+        self.assertEqual(response, {"continue": True})
+        self.assertEqual(self.state("stale-complete")["status"], "failed")
+
     def test_continuation_keeps_recent_progress_constraints_and_validation(self) -> None:
         with self.env():
             self.call("continuation", ratio=0.31)
@@ -1050,13 +1581,13 @@ class RelayTests(unittest.TestCase):
         ), ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(self.call, "race", ratio=0.31) for _ in range(2)]
             responses = [future.result(timeout=10) for future in futures]
-        self.assertTrue(all(response.get("decision") == "block" for response in responses))
+        self.assertTrue(all(response.get("continue") is False for response in responses))
         self.assertEqual(
             len([x for x in self.log_entries() if x.get("method") == "thread/start"]),
             1,
         )
 
-    def test_unavailable_telemetry_and_malformed_state_fail_open(self) -> None:
+    def test_non_trigger_guard_and_malformed_state_fail_open(self) -> None:
         with self.env():
             unavailable = relay.handle_hook(
                 repo=self.repo,
@@ -1069,7 +1600,7 @@ class RelayTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("{broken", encoding="utf-8")
             malformed = self.call("broken", ratio=0.31)
-        self.assertEqual(malformed["decision"], "block")
+        self.assertIs(malformed["continue"], False)
 
     def test_failed_launch_can_retry_on_a_later_eligible_event(self) -> None:
         with self.env(), mock.patch.object(
@@ -1082,7 +1613,7 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(self.state("retry")["status"], "failed")
         with self.env():
             succeeded = self.call("retry", ratio=0.31)
-        self.assertEqual(succeeded["decision"], "block")
+        self.assertIs(succeeded["continue"], False)
         self.assertEqual(self.state("retry")["status"], "running")
 
     def test_post_ack_turn_failure_retries_instead_of_stranding_source(self) -> None:
@@ -1093,11 +1624,11 @@ class RelayTests(unittest.TestCase):
             clear=False,
         ):
             first = self.call("post-ack", ratio=0.31)
-            self.assertEqual(first["decision"], "block")
+            self.assertIs(first["continue"], False)
             self.outcome("post-ack", status="failed")
             failed_destination = self.state("post-ack")["destination_thread_id"]
             second = self.call("post-ack", ratio=0.31)
-            self.assertEqual(second["decision"], "block")
+            self.assertIs(second["continue"], False)
             self.outcome("post-ack", status="completed")
         self.assertNotEqual(
             failed_destination,
@@ -1120,16 +1651,16 @@ class RelayTests(unittest.TestCase):
             self.assertEqual(self.call("settings-error", ratio=0.31), {"continue": True})
         self.assertFalse(any(x.get("method") == "thread/start" for x in self.log_entries()))
 
-    def test_approval_request_is_not_automatically_declined(self) -> None:
+    def test_approval_request_fails_open_before_acknowledgement(self) -> None:
         with self.env(), mock.patch.dict(
             os.environ,
             {"FAKE_CODEX_REQUEST_APPROVAL": "1"},
             clear=False,
         ):
             response = self.call("approval", ratio=0.31)
-            outcome = self.outcome("approval", status="failed")
-        self.assertEqual(response["decision"], "block")
-        self.assertIn("approval", outcome["error"])
+        self.assertEqual(response, {"continue": True})
+        self.assertEqual(self.state("approval")["status"], "failed")
+        self.assertIn("approval", self.state("approval")["error"])
         self.assertFalse(any(item.get("id") == 999 for item in self.log_entries()))
 
 

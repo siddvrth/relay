@@ -33,12 +33,7 @@ class LaunchConfig:
     response_timeout: float = 30.0
     turn_timeout: float = 3600.0
     thread_name: str | None = None
-    relay_chain_id: str | None = None
-    relay_sequence: int | None = None
     source_thread_id: str | None = None
-    presentation_mode: str = "headless"
-    presentation_timeout: float = 10.0
-    presentation_ack_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +43,6 @@ class LaunchResult:
     destination_turn_id: str | None
     worker_pid: int | None = None
     error: str | None = None
-    presentation_verified: bool = False
 
 
 def launch(
@@ -61,8 +55,8 @@ def launch(
     The worker stays detached while the destination owns the Goal, then closes
     its app-server and writes a completed outcome when that Goal becomes
     terminal or the destination acknowledges its own successor. The hook
-    process returns promptly after the destination is real and, for Desktop
-    mode, the exact presentation proof has been observed.
+    process returns promptly after the destination is real and its first turn
+    has started.
     """
 
     try:
@@ -138,14 +132,12 @@ def launch(
     if not isinstance(thread_id, str) or not isinstance(turn_id, str):
         _reap_worker(worker)
         return LaunchResult(False, None, None, error="worker_acknowledgement_missing_ids")
-    presentation_verified = message.get("presentation_verified") is True
     _release_worker_handle(worker)
     return LaunchResult(
         True,
         thread_id,
         turn_id,
         worker_pid=worker.pid,
-        presentation_verified=presentation_verified,
     )
 
 
@@ -153,18 +145,28 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
     acknowledged = False
     acknowledgement_result: ProtocolAcknowledgement | None = None
     outcome_path: Path | None = None
+    worker_metadata: dict[str, object] = {
+        "worker_pid": os.getpid(),
+        "worker_pgid": os.getpid(),
+        "request_path": str(request_path),
+    }
     with os.fdopen(ack_fd, "w", encoding="utf-8") as acknowledgement:
         try:
             payload = json.loads(request_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                worker_metadata.update(
+                    {
+                        "cwd": payload.get("cwd"),
+                        "codex_binary": payload.get("codex_binary"),
+                    }
+                )
             if isinstance(payload, dict) and isinstance(payload.get("outcome_path"), str):
                 outcome_path = Path(payload["outcome_path"])
                 _write_outcome(
                     outcome_path,
                     {
                         "status": "running",
-                        "worker_pid": os.getpid(),
-                        "worker_pgid": os.getpid(),
-                        "cwd": payload.get("cwd") if isinstance(payload, dict) else None,
+                        **worker_metadata,
                     },
                 )
             config = _config_from_json(payload)
@@ -179,9 +181,6 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
                         "acknowledged": True,
                         "thread_id": result.thread_id,
                         "turn_id": result.turn_id,
-                        "presentation_verified": bool(
-                            result.presentation and result.presentation.verified
-                        ),
                     },
                     acknowledgement,
                 )
@@ -199,15 +198,16 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
                     outcome_path,
                     {
                         "status": "completed",
+                        **worker_metadata,
                         "thread_id": completion.acknowledgement.thread_id,
                         "turn_id": completion.acknowledgement.turn_id,
-                        "presentation_verified": completion.presentation_verified,
                     },
                 )
             return 0
         except Exception as error:  # The source hook fails open on this path.
             if outcome_path is not None:
                 failed: dict[str, object] = {
+                    **worker_metadata,
                     "status": "failed",
                     "error": str(error),
                 }
@@ -238,15 +238,8 @@ def _validate(config: LaunchConfig) -> None:
         raise ValueError(f"codex binary not found: {config.codex_binary}")
     if config.response_timeout <= 0 or config.turn_timeout <= 0:
         raise ValueError("app-server timeouts must be positive")
-    if config.presentation_timeout <= 0:
-        raise ValueError("presentation timeout must be positive")
     if config.outcome_path is not None and not config.outcome_path.is_absolute():
         raise ValueError("outcome path must be absolute")
-    if (
-        config.presentation_ack_path is not None
-        and not config.presentation_ack_path.is_absolute()
-    ):
-        raise ValueError("presentation acknowledgement path must be absolute")
 
 
 def _config_json(config: LaunchConfig) -> dict[str, object]:
@@ -263,16 +256,7 @@ def _config_json(config: LaunchConfig) -> dict[str, object]:
         "response_timeout": config.response_timeout,
         "turn_timeout": config.turn_timeout,
         "thread_name": config.thread_name,
-        "relay_chain_id": config.relay_chain_id,
-        "relay_sequence": config.relay_sequence,
         "source_thread_id": config.source_thread_id,
-        "presentation_mode": config.presentation_mode,
-        "presentation_timeout": config.presentation_timeout,
-        "presentation_ack_path": (
-            str(config.presentation_ack_path)
-            if config.presentation_ack_path is not None
-            else None
-        ),
     }
 
 
@@ -283,12 +267,6 @@ def _config_from_json(payload: object) -> ProtocolConfig:
     status = payload.get("goal_status")
     token_budget = payload.get("goal_token_budget")
     settings = payload.get("settings")
-    presentation_mode_value = payload.get("presentation_mode")
-    presentation_mode = (
-        presentation_mode_value
-        if isinstance(presentation_mode_value, str)
-        else "headless"
-    )
     return ProtocolConfig(
         cwd=Path(str(payload["cwd"])),
         continuation_prompt=str(payload["continuation_prompt"]),
@@ -309,27 +287,9 @@ def _config_from_json(payload: object) -> ProtocolConfig:
             if isinstance(payload.get("thread_name"), str)
             else None
         ),
-        relay_chain_id=(
-            payload.get("relay_chain_id")
-            if isinstance(payload.get("relay_chain_id"), str)
-            else None
-        ),
-        relay_sequence=(
-            payload.get("relay_sequence")
-            if isinstance(payload.get("relay_sequence"), int)
-            and not isinstance(payload.get("relay_sequence"), bool)
-            else None
-        ),
         source_thread_id=(
             payload.get("source_thread_id")
             if isinstance(payload.get("source_thread_id"), str)
-            else None
-        ),
-        presentation_mode=presentation_mode,
-        presentation_timeout=float(payload.get("presentation_timeout", 10.0)),
-        presentation_ack_path=(
-            Path(payload["presentation_ack_path"])
-            if isinstance(payload.get("presentation_ack_path"), str)
             else None
         ),
     )
@@ -350,15 +310,9 @@ def _write_outcome(path: Path, payload: dict[str, object]) -> None:
 
 
 def _stop_worker(worker: subprocess.Popen[bytes]) -> None:
-    if worker.poll() is not None:
+    if worker.poll() is not None and not _process_group_exists(worker.pid):
         return
-    try:
-        os.killpg(worker.pid, signal.SIGTERM)
-        worker.wait(timeout=5)
-    except (ProcessLookupError, subprocess.TimeoutExpired):
-        if worker.poll() is None:
-            os.killpg(worker.pid, signal.SIGKILL)
-            worker.wait(timeout=5)
+    _terminate_process_group(worker.pid, timeout=5)
 
 
 def stop_worker_pid(
@@ -371,20 +325,48 @@ def stop_worker_pid(
 
     if pid <= 0 or not _is_relay_worker(pid, repo):
         return False
+    return _terminate_process_group(pid, timeout=timeout)
+
+
+def stop_worker_group(
+    pid: int,
+    *,
+    repo: Path,
+    outcome_path: Path | None = None,
+    timeout: float = 5.0,
+) -> bool:
+    """Terminate an orphaned Relay process group after validating its outcome."""
+
+    if pid <= 0:
+        return False
+    if not _is_relay_worker(pid, repo) and not _is_relay_worker_group(
+        pid,
+        repo,
+        outcome_path,
+    ):
+        return False
+    return _terminate_process_group(pid, timeout=timeout)
+
+
+def _terminate_process_group(pid: int, *, timeout: float) -> bool:
     try:
         os.killpg(pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
         return False
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not _pid_exists(pid):
+        if not _process_group_exists(pid):
             return True
         time.sleep(0.05)
     try:
         os.killpg(pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         pass
-    return not _pid_exists(pid)
+    return not _process_group_exists(pid)
+
+
+def worker_pid_is_relay(pid: int, *, repo: Path) -> bool:
+    return pid > 0 and _is_relay_worker(pid, repo)
 
 
 def _is_relay_worker(pid: int, repo: Path | None) -> bool:
@@ -400,7 +382,86 @@ def _is_relay_worker(pid: int, repo: Path | None) -> bool:
     command = result.stdout.strip()
     if "codex_app_transport.py" not in command or "--worker-request" not in command:
         return False
-    return repo is None or str(repo.resolve()) in command
+    if repo is None:
+        return True
+    return any(candidate in command for candidate in {str(repo), str(repo.resolve())})
+
+
+def _is_relay_worker_group(
+    pid: int,
+    repo: Path,
+    outcome_path: Path | None,
+) -> bool:
+    if outcome_path is None or not outcome_path.is_absolute():
+        return False
+    try:
+        outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(outcome, dict):
+        return False
+    if (
+        outcome.get("worker_pid") != pid
+        or outcome.get("worker_pgid") != pid
+        or outcome.get("cwd") not in {str(repo), str(repo.resolve())}
+    ):
+        return False
+    request_path = outcome.get("request_path")
+    codex_binary = outcome.get("codex_binary")
+    if (
+        not isinstance(request_path, str)
+        or not Path(request_path).is_absolute()
+        or not Path(request_path).is_file()
+        or not isinstance(codex_binary, str)
+        or not codex_binary
+    ):
+        return False
+    binary_tokens = {
+        codex_binary,
+        Path(codex_binary).name,
+        Path(codex_binary).stem,
+        "codex",
+    }
+    for member_pid, member_pgid, stat, command in _process_group_entries(pid):
+        if (
+            member_pgid == pid
+            and member_pid != pid
+            and not stat.startswith("Z")
+            and any(token and token in command for token in binary_tokens)
+            and ("app-server" in command or "--stdio" in command)
+        ):
+            return True
+    return False
+
+
+def _process_group_entries(pgid: int) -> list[tuple[int, int, str, str]]:
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,pgid=,stat=,command="],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    entries: list[tuple[int, int, str, str]] = []
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(None, 3)
+        if len(fields) != 4:
+            continue
+        try:
+            member_pid = int(fields[0])
+            member_pgid = int(fields[1])
+        except ValueError:
+            continue
+        if member_pgid == pgid:
+            entries.append((member_pid, member_pgid, fields[2], fields[3]))
+    return entries
+
+
+def _process_group_exists(pgid: int) -> bool:
+    return any(not stat.startswith("Z") for _, _, stat, _ in _process_group_entries(pgid))
 
 
 def _pid_exists(pid: int) -> bool:
@@ -435,7 +496,8 @@ def _reap_worker(worker: subprocess.Popen[bytes]) -> None:
     try:
         worker.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        _stop_worker(worker)
+        pass
+    _stop_worker(worker)
 
 
 def main() -> int:

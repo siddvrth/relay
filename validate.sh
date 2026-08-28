@@ -13,13 +13,32 @@ trap 'rm -rf "$PYCACHE" "$INSTALL_ROOT" "$CODEX_HOME_TEST" "$SMOKE_REPO"' EXIT
 export PYTHONPYCACHEPREFIX="$PYCACHE"
 
 PYTHONS=()
-for candidate in python3 python3.10 python3.11; do
+VALIDATION_PYTHON=""
+if [[ -n "${RELAY_PYTHON:-}" ]]; then
+  PYTHON_CANDIDATES=("$RELAY_PYTHON")
+else
+  PYTHON_CANDIDATES=(
+    python3
+    python3.10
+    python3.11
+    python3.12
+    python3.13
+    python3.14
+    python3.15
+  )
+fi
+for candidate in "${PYTHON_CANDIDATES[@]}"; do
   if ! command -v "$candidate" >/dev/null 2>&1; then
     continue
   fi
   executable="$(command -v "$candidate")"
-  version="$($executable -c 'import sys; print(sys.version_info[:2])')"
-  if [[ "$version" != "(3, 10)" && "$version" != "(3, 11)" && "$version" != "(3, 12)" && "$version" != "(3, 13)" && "$version" != "(3, 14)" ]]; then
+  version="$("$executable" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null || true)"
+  if [[ ! "$version" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+    continue
+  fi
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  if (( major != 3 || minor < 10 )); then
     continue
   fi
   duplicate=false
@@ -28,18 +47,18 @@ for candidate in python3 python3.10 python3.11; do
   done
   if [[ "$duplicate" == false ]]; then
     PYTHONS+=("$executable")
+    [[ -n "$VALIDATION_PYTHON" ]] || VALIDATION_PYTHON="$executable"
     echo "Python $version: $candidate -> $executable"
   fi
 done
-[[ "${#PYTHONS[@]}" -gt 0 ]] || { echo "Python 3.10+ is required" >&2; exit 1; }
+[[ -n "$VALIDATION_PYTHON" ]] || { echo "Python 3.10 or newer is required; install it and rerun validate.sh" >&2; exit 1; }
 
 for python_runtime in "${PYTHONS[@]}"; do
   "$python_runtime" -m py_compile "$SKILL"/*.py "$PKG/scripts"/*.py
 done
 
-python3 "$PKG/scripts/validate_distribution.py"
-python3 "$SKILL/test_context_usage.py" -q
-python3 "$SKILL/test_relay.py" -q
+"$VALIDATION_PYTHON" "$PKG/scripts/validate_distribution.py"
+"$VALIDATION_PYTHON" "$SKILL/test_relay.py" -q
 bash -n "$PKG/hooks/relay_hook.sh"
 
 if command -v codex >/dev/null 2>&1; then
@@ -52,7 +71,7 @@ if command -v codex >/dev/null 2>&1; then
   cp "$PKG/skills/relay/SKILL.md" "$INSTALL_ROOT/plugins/relay/skills/relay/"
   cp "$PKG/skills/relay/agents/openai.yaml" "$INSTALL_ROOT/plugins/relay/skills/relay/agents/"
   cp "$PKG/skills/relay/scripts/"*.py "$INSTALL_ROOT/plugins/relay/skills/relay/scripts/"
-  python3 - "$INSTALL_ROOT/.agents/plugins/marketplace.json" <<'PY'
+  "$VALIDATION_PYTHON" - "$INSTALL_ROOT/.agents/plugins/marketplace.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -76,22 +95,22 @@ Path(sys.argv[1]).write_text(
 PY
   CODEX_HOME="$CODEX_HOME_TEST" codex plugin marketplace add "$INSTALL_ROOT" --json >/dev/null
   installed_json="$(CODEX_HOME="$CODEX_HOME_TEST" codex plugin add relay@relay-local --json)"
-  installed_path="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["installedPath"])' "$installed_json")"
+  installed_path="$("$VALIDATION_PYTHON" -c 'import json,sys; print(json.loads(sys.argv[1])["installedPath"])' "$installed_json")"
   installed_list="$(CODEX_HOME="$CODEX_HOME_TEST" codex plugin list --json)"
-  python3 -c 'import json,sys; assert any(item.get("name") == "relay" for item in json.loads(sys.argv[1]).get("installed", []))' "$installed_list"
+  "$VALIDATION_PYTHON" -c 'import json,sys; assert any(item.get("name") == "relay" for item in json.loads(sys.argv[1]).get("installed", []))' "$installed_list"
   test -f "$installed_path/hooks/hooks.json"
   test -f "$installed_path/skills/relay/scripts/relay.py"
   mkdir -p "$SMOKE_REPO"
   git init -q "$SMOKE_REPO"
-  installed_hook="$(cd "$SMOKE_REPO" && RELAY_CODEX_APP_TRANSPORT=disabled PLUGIN_ROOT="$installed_path" ROOT="$SMOKE_REPO" bash "$installed_path/hooks/relay_hook.sh" UserPromptSubmit <<< '{"session_id":"install-smoke"}')"
-  python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == {"continue": True}' "$installed_hook"
-  echo "clean Codex plugin install: OK"
+  installed_hook="$(cd "$SMOKE_REPO" && RELAY_CODEX_APP_TRANSPORT=disabled PLUGIN_ROOT="$installed_path" ROOT="$SMOKE_REPO" bash "$installed_path/hooks/relay_hook.sh" PreCompact <<< '{"session_id":"install-smoke","trigger":"auto"}')"
+  "$VALIDATION_PYTHON" -c 'import json,sys; assert json.loads(sys.argv[1]) == {"continue": True}' "$installed_hook"
+  echo "clean Codex plugin install with PreCompact hook: OK"
 else
   echo "clean Codex plugin install: SKIPPED (codex binary not found)"
 fi
 
 if [[ "${RELAY_RUN_REAL_SMOKE:-0}" == "1" ]]; then
-  python3 "$SKILL/smoke_codex_app_transport.py"
+  "$VALIDATION_PYTHON" "$SKILL/smoke_codex_app_transport.py"
 else
   echo "real local app-server smoke: SKIPPED (set RELAY_RUN_REAL_SMOKE=1)"
 fi

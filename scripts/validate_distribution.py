@@ -86,15 +86,17 @@ def validate() -> None:
     hooks = load_object(HOOKS).get("hooks")
     if not isinstance(hooks, dict):
         fail("hooks/hooks.json must contain hooks")
-    if set(hooks) != {"UserPromptSubmit", "PreToolUse", "SessionEnd"}:
-        fail("plugin must expose prompt, tool, and session-end hooks")
-    for event in ("UserPromptSubmit", "PreToolUse", "SessionEnd"):
+    if set(hooks) != {"PreCompact", "UserPromptSubmit", "PreToolUse", "SessionEnd"}:
+        fail("plugin must expose automatic compact, prompt, tool, and session-end hooks")
+    for event in ("PreCompact", "UserPromptSubmit", "PreToolUse", "SessionEnd"):
         entries = hooks.get(event)
         if not isinstance(entries, list) or not entries:
             fail(f"missing plugin hook: {event}")
         command = json.dumps(entries)
         if "${PLUGIN_ROOT}/hooks/relay_hook.sh" not in command:
             fail(f"{event} hook does not resolve through PLUGIN_ROOT")
+    if hooks["PreCompact"][0].get("matcher") != "auto":
+        fail("PreCompact must match automatic compaction only")
 
     skill_files = sorted((ROOT / "skills").glob("*/SKILL.md"))
     if [path.parent.name for path in skill_files] != ["relay"]:

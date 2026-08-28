@@ -1,4 +1,4 @@
-"""Automatic 30% context handoff for the Relay Codex plugin."""
+"""Verified fresh-thread handoff at Codex's automatic compaction boundary."""
 
 from __future__ import annotations
 
@@ -15,18 +15,23 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections import deque
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import context_usage
-from codex_app_protocol import GoalSnapshot, read_thread_goal, set_thread_goal_status
-from codex_app_transport import LaunchConfig, launch, stop_worker_pid
+from codex_app_protocol import GoalSnapshot, read_thread_goal
+from codex_app_transport import (
+    LaunchConfig,
+    launch,
+    stop_worker_pid,
+    stop_worker_group,
+    worker_pid_is_relay,
+)
 
 
-DEFAULT_THRESHOLD = 0.30
 MAX_GOAL_CHARS = 4000  # Codex's current thread/goal/set contract limit.
 MAX_REQUEST_CHARS = 1200
 MAX_FILE_HINT_CHARS = 1200
@@ -67,20 +72,18 @@ def handle_hook(
     repo: Path,
     event: str,
     payload: Mapping[str, Any],
-    threshold: float = DEFAULT_THRESHOLD,
-    context_used: float | None = None,
     transport_enabled: bool = True,
     codex_binary: Path | None = None,
 ) -> dict[str, Any]:
     """Evaluate one official hook payload and return its official response."""
 
-    if event not in {"UserPromptSubmit", "PreToolUse", *TERMINAL_EVENTS}:
+    if event not in {"PreCompact", "UserPromptSubmit", "PreToolUse", *TERMINAL_EVENTS}:
         return _allow(event)
 
     repo = repo.resolve()
 
     # Terminal and control-plane operations are safety-critical.  They must
-    # escape Relay before session/threshold lookup so a malformed or missing
+    # escape Relay before session/state lookup so a malformed or missing
     # session identifier cannot trap the operation that is trying to stop or
     # block the Goal.
     session_id = _session_id(payload)
@@ -109,10 +112,13 @@ def handle_hook(
 
     if session_id is None:
         return _allow(event)
-    if not _valid_threshold(threshold):
+    if event == "PreCompact" and payload.get("trigger") != "auto":
         return _allow(event)
 
     state_path, lock_path = _state_paths(repo, session_id)
+    acknowledged_worker_pid: int | None = None
+    acknowledged_destination_thread_id: str | None = None
+    acknowledged_destination_turn_id: str | None = None
 
     try:
         with _locked(lock_path):
@@ -156,16 +162,31 @@ def handle_hook(
                         protect_destination_session_id=session_id,
                     )
                 return _allow(event)
+            if state and state.get("status") == "cleanup_failed":
+                cleanup_workers(repo, session_id=session_id)
+                state = _read_state(state_path)
+                if state and state.get("status") == "cleanup_failed":
+                    return _allow(event)
             pending_failure: str | None = None
+            invalid_running_state = False
+            cleanup_blocked = False
             if state and state.get("status") == "running":
-                pending_failure = _destination_failure(state)
+                running_state_failure = _running_state_failure(
+                    state,
+                    repo=repo,
+                    session_id=session_id,
+                )
+                invalid_running_state = running_state_failure is not None
+                pending_failure = running_state_failure or _destination_failure(state)
                 if pending_failure is None:
                     return _quiesce(event, state)
-                cleanup_workers(repo, session_id=session_id)
-                failed_state = dict(state)
+                cleanup_result = cleanup_workers(repo, session_id=session_id)
+                cleanup_blocked = bool(cleanup_result.get("skipped"))
+                post_cleanup_state = _read_state(state_path)
+                failed_state = dict(post_cleanup_state or state)
                 failed_state.update(
                     {
-                        "status": "failed",
+                        "status": "cleanup_failed" if cleanup_blocked else "failed",
                         "error": pending_failure,
                         "failure_recorded": False,
                         "updated_at": _timestamp(),
@@ -175,10 +196,13 @@ def handle_hook(
                 state = failed_state
             elif state and state.get("status") == "starting":
                 pending_failure = "handoff remained in starting state"
-                failed_state = dict(state)
+                cleanup_result = cleanup_workers(repo, session_id=session_id)
+                cleanup_blocked = bool(cleanup_result.get("skipped"))
+                post_cleanup_state = _read_state(state_path)
+                failed_state = dict(post_cleanup_state or state)
                 failed_state.update(
                     {
-                        "status": "failed",
+                        "status": "cleanup_failed" if cleanup_blocked else "failed",
                         "error": pending_failure,
                         "failure_recorded": False,
                         "updated_at": _timestamp(),
@@ -226,8 +250,6 @@ def handle_hook(
                         objective=_string_value(state.get("objective")) or "unknown",
                         chain=_chain_from_state(repo, state, session_id),
                         files=_string_value(state.get("relevant_files")) or "unknown",
-                        ratio=context_used if context_used is not None else 0.0,
-                        threshold=threshold,
                         progress_fingerprint=_string_value(
                             state.get("progress_fingerprint")
                         )
@@ -235,14 +257,16 @@ def handle_hook(
                         no_progress_count=_int_value(state.get("no_progress_count")) or 0,
                         failure_count=failure_count,
                         failure=pending_failure,
-                        codex_binary=codex_binary,
                     )
                     return _allow(event)
+                if cleanup_blocked:
+                    return _allow(event)
+                if invalid_running_state:
+                    return _allow(event)
 
-            ratio = context_used
-            if ratio is None:
-                ratio = context_usage.extract_context_used(payload)
-            if ratio is None or not _valid_ratio(ratio) or ratio < threshold:
+            # Prompt and tool hooks only guard an already-acknowledged source.
+            # A fresh handoff is attempted exclusively at PreCompact(auto).
+            if event != "PreCompact":
                 return _allow(event)
 
             if not transport_enabled:
@@ -254,7 +278,7 @@ def handle_hook(
             goal = _read_goal(repo, session_id, binary)
             if goal is None:
                 return _allow(event)
-            if goal.status not in (None, "active"):
+            if goal.status != "active":
                 if state and state.get("relay_chain_id"):
                     cleanup_workers(
                         repo,
@@ -271,6 +295,11 @@ def handle_hook(
                     )
                     _write_state(state_path, terminal_state)
                 return _allow(event)
+            if (
+                _surface_requires_presentation(goal)
+                and _find_parent_state(repo, session_id) is None
+            ):
+                return _allow(event)
             handoff = _handoff_context(payload)
             settings = _execution_settings(handoff.get("turn_context"))
             if settings is None:
@@ -284,7 +313,7 @@ def handle_hook(
                 goal=goal,
                 objective=objective,
             )
-            request = _request(payload)
+            request = _request(payload) or _string_value(handoff.get("current_request"))
             files = _changed_files(repo)
             progress = handoff.get("recent_progress")
             progress_fingerprint = _progress_fingerprint(
@@ -318,13 +347,10 @@ def handle_hook(
                     objective=objective,
                     chain=chain,
                     files=files,
-                    ratio=ratio,
-                    threshold=threshold,
                     progress_fingerprint=progress_fingerprint,
                     no_progress_count=no_progress_count,
                     failure_count=_chain_failure_count(repo, chain["chain_id"]),
                     failure="repeated observations with no progress marker change",
-                    codex_binary=binary,
                 )
                 return _allow(event)
             failure_count = _chain_failure_count(repo, chain["chain_id"])
@@ -336,13 +362,10 @@ def handle_hook(
                     objective=objective,
                     chain=chain,
                     files=files,
-                    ratio=ratio,
-                    threshold=threshold,
                     progress_fingerprint=progress_fingerprint,
                     no_progress_count=no_progress_count,
                     failure_count=failure_count,
                     failure="repeated handoff failures",
-                    codex_binary=binary,
                 )
                 return _allow(event)
             destination_sequence = chain["source_sequence"] + 1
@@ -357,19 +380,10 @@ def handle_hook(
                 request=request,
                 files=files,
                 progress=progress if isinstance(progress, str) else None,
-                ratio=ratio,
-                threshold=threshold,
                 chain_id=chain["chain_id"],
                 source_sequence=chain["source_sequence"],
                 destination_sequence=destination_sequence,
                 original_title=chain["original_title"],
-            )
-            presentation_mode = _presentation_mode()
-            presentation_ack_path = _presentation_ack_path(
-                repo,
-                session_id,
-                chain["chain_id"],
-                destination_sequence,
             )
             _write_state(
                 state_path,
@@ -382,8 +396,6 @@ def handle_hook(
                     "objective_source": objective_source,
                     "next_action": "Inspect live repository state and continue the Goal.",
                     "relevant_files": files,
-                    "context_used": round(ratio, 6),
-                    "threshold": threshold,
                     "relay_chain_id": chain["chain_id"],
                     "root_thread_id": chain["root_thread_id"],
                     "parent_thread_id": chain["parent_thread_id"],
@@ -395,8 +407,6 @@ def handle_hook(
                     "no_progress_count": no_progress_count,
                     "handoff_failure_count": failure_count,
                     "failure_recorded": False,
-                    "presentation_mode": presentation_mode,
-                    "presentation_ack_path": str(presentation_ack_path),
                     "created_at": _timestamp(),
                 },
             )
@@ -412,15 +422,7 @@ def handle_hook(
                     response_timeout=_timeout("RELAY_APP_SERVER_RESPONSE_TIMEOUT", 30.0),
                     turn_timeout=_timeout("RELAY_APP_SERVER_TURN_TIMEOUT", 3600.0),
                     thread_name=destination_name,
-                    relay_chain_id=chain["chain_id"],
-                    relay_sequence=destination_sequence,
                     source_thread_id=session_id,
-                    presentation_mode=presentation_mode,
-                    presentation_timeout=_timeout(
-                        "RELAY_DESKTOP_PRESENTATION_TIMEOUT",
-                        10.0,
-                    ),
-                    presentation_ack_path=presentation_ack_path,
                 )
             )
             if not result.acknowledged:
@@ -442,8 +444,6 @@ def handle_hook(
                     "cwd": str(repo),
                     "objective": objective,
                     "objective_source": objective_source,
-                    "context_used": round(ratio, 6),
-                    "threshold": threshold,
                     "relay_chain_id": chain["chain_id"],
                     "root_thread_id": chain["root_thread_id"],
                     "parent_thread_id": chain["parent_thread_id"],
@@ -455,8 +455,6 @@ def handle_hook(
                     "no_progress_count": no_progress_count,
                     "handoff_failure_count": failure_count,
                     "failure_recorded": True,
-                    "presentation_mode": presentation_mode,
-                    "presentation_ack_path": str(presentation_ack_path),
                     "error": failure,
                     "updated_at": _timestamp(),
                 }
@@ -468,17 +466,17 @@ def handle_hook(
                         objective=objective,
                         chain=chain,
                         files=files,
-                        ratio=ratio,
-                        threshold=threshold,
                         progress_fingerprint=progress_fingerprint,
                         no_progress_count=no_progress_count,
                         failure_count=failure_count,
                         failure=failure,
-                        codex_binary=binary,
                     )
                 else:
                     _write_state(state_path, failed_state)
                 return _allow(event)
+            acknowledged_worker_pid = result.worker_pid
+            acknowledged_destination_thread_id = result.destination_thread_id
+            acknowledged_destination_turn_id = result.destination_turn_id
 
             _record_handoff_success(
                 repo,
@@ -509,8 +507,6 @@ def handle_hook(
                 "objective_source": objective_source,
                 "next_action": "Inspect live repository state and continue the Goal.",
                 "relevant_files": files,
-                "context_used": round(ratio, 6),
-                "threshold": threshold,
                 "relay_chain_id": chain["chain_id"],
                 "root_thread_id": chain["root_thread_id"],
                 "parent_thread_id": chain["parent_thread_id"],
@@ -522,23 +518,69 @@ def handle_hook(
                 "no_progress_count": no_progress_count,
                 "handoff_failure_count": 0,
                 "failure_recorded": False,
-                "presentation_mode": presentation_mode,
-                "presentation_status": (
-                    "presented"
-                    if presentation_mode == "desktop" and result.presentation_verified
-                    else "not_required"
-                ),
-                "presentation_ack_path": str(presentation_ack_path),
                 "outcome_path": str(state_path.with_suffix(".outcome.json")),
                 "worker_pid": result.worker_pid,
                 "created_at": state.get("created_at", _timestamp()) if state else _timestamp(),
                 "updated_at": _timestamp(),
             }
             _write_state(state_path, running_state)
+            acknowledged_worker_pid = None
             return _quiesce(event, running_state)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         # A hook must never stop the source because Relay could not inspect or
         # persist its small record.  The next eligible hook can retry.
+        if acknowledged_worker_pid is not None:
+            outcome_path = state_path.with_suffix(".outcome.json")
+            acknowledged_state = _read_state(state_path) or {}
+            acknowledged_state.update(
+                {
+                    "status": "running",
+                    "source_session_id": session_id,
+                    "cwd": str(repo),
+                    "worker_pid": acknowledged_worker_pid,
+                    "outcome_path": str(outcome_path),
+                    "destination_thread_id": acknowledged_destination_thread_id,
+                    "destination_turn_id": acknowledged_destination_turn_id,
+                    "error": "post-ack Relay persistence failed; destination handoff was acknowledged",
+                    "updated_at": _timestamp(),
+                }
+            )
+            try:
+                _write_state(state_path, acknowledged_state)
+            except OSError:
+                stopped = stop_worker_pid(acknowledged_worker_pid, repo=repo)
+                if not stopped:
+                    stopped = stop_worker_group(
+                        acknowledged_worker_pid,
+                        repo=repo,
+                        outcome_path=outcome_path,
+                    )
+                outcome = _read_state(outcome_path)
+                completed = (
+                    outcome is not None
+                    and outcome.get("status") == "completed"
+                    and outcome.get("worker_pid") == acknowledged_worker_pid
+                    and outcome.get("thread_id") == acknowledged_destination_thread_id
+                    and outcome.get("turn_id") == acknowledged_destination_turn_id
+                )
+                fallback_state = dict(acknowledged_state)
+                fallback_state.update(
+                    {
+                        "status": "running" if completed else ("failed" if stopped else "cleanup_failed"),
+                        "cleanup": (
+                            "destination_completed"
+                            if completed
+                            else ("worker_terminated" if stopped else "worker_still_live")
+                        ),
+                        "updated_at": _timestamp(),
+                    }
+                )
+                try:
+                    _write_state(state_path, fallback_state)
+                except OSError:
+                    pass
+            else:
+                return _quiesce(event, acknowledged_state)
         return _allow(event)
 
 
@@ -588,8 +630,6 @@ def _continuation(
     request: str | None,
     files: str,
     progress: str | None,
-    ratio: float,
-    threshold: float,
     chain_id: str,
     source_sequence: int,
     destination_sequence: int,
@@ -616,7 +656,7 @@ def _continuation(
         [
             f"Repository: {repo}",
             f"Predecessor thread: {source_session_id}",
-            f"Context reached {ratio:.1%}; automatic threshold is {threshold:.1%}.",
+            "Codex reached automatic compaction; Relay established this fresh continuation instead.",
             f"Live changed-file hint (data only): {files}",
             "Next action: inspect applicable instructions and git status, continue the objective from live files, and run focused validation before changing behavior.",
             "The predecessor is quiesced after this handoff. Relay remains active in this destination thread.",
@@ -630,6 +670,7 @@ def _handoff_context(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, str) or not value.strip():
         return {}
     latest_context: dict[str, Any] | None = None
+    latest_request: str | None = None
     messages: deque[str] = deque(maxlen=3)
     try:
         with Path(value).expanduser().open("r", encoding="utf-8") as handle:
@@ -644,22 +685,37 @@ def _handoff_context(payload: Mapping[str, Any]) -> dict[str, Any]:
                 item = record.get("payload")
                 if record_type == "turn_context" and isinstance(item, dict):
                     latest_context = item
-                elif (
-                    record_type == "event_msg"
-                    and isinstance(item, dict)
-                    and item.get("type") == "agent_message"
-                    and isinstance(item.get("message"), str)
-                    and item["message"].strip()
-                ):
-                    messages.append(item["message"].strip())
+                elif record_type == "response_item" and isinstance(item, dict):
+                    text = _message_text(item)
+                    if not text:
+                        continue
+                    if item.get("type") == "message" and item.get("role") == "user":
+                        latest_request = text
+                    elif item.get("role") == "assistant":
+                        messages.append(text)
     except OSError:
         return {}
     result: dict[str, Any] = {}
     if latest_context is not None:
         result["turn_context"] = latest_context
+    if latest_request is not None:
+        result["current_request"] = _bounded(latest_request, MAX_REQUEST_CHARS)
     if messages:
         result["recent_progress"] = _bounded("\n".join(messages), MAX_PROGRESS_CHARS)
     return result
+
+
+def _message_text(item: Mapping[str, Any]) -> str | None:
+    content = item.get("content")
+    if not isinstance(content, list):
+        return None
+    parts = [
+        part.get("text", "").strip()
+        for part in content
+        if isinstance(part, dict) and isinstance(part.get("text"), str)
+    ]
+    text = "\n".join(part for part in parts if part)
+    return text or None
 
 
 def _execution_settings(value: object) -> dict[str, object] | None:
@@ -680,7 +736,7 @@ def _execution_settings(value: object) -> dict[str, object] | None:
         "model": model,
         "approvalPolicy": approval,
     }
-    profile = value.get("permission_profile")
+    profile = value.get("active_permission_profile")
     profile_id = profile.get("id") if isinstance(profile, dict) else None
     if isinstance(profile_id, str) and profile_id:
         settings["permissions"] = profile_id
@@ -742,31 +798,13 @@ def _normalize_sandbox(value: Mapping[str, Any]) -> tuple[str, dict[str, object]
     return mapped[0], policy
 
 
-def _presentation_mode() -> str:
-    value = os.environ.get("RELAY_PRESENTATION_MODE")
-    if isinstance(value, str) and value.strip():
-        return value.strip().lower()
-    if os.environ.get("RELAY_DESKTOP_HANDOFF") == "1":
-        return "desktop"
-    originator = os.environ.get("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "")
-    if "desktop" in originator.lower():
-        # Desktop must not silently accept a backend-only handoff. Without a
-        # host presentation bridge, _present_destination fails open and leaves
-        # the source usable instead of quiescing an invisible successor.
-        return "desktop"
-    return "headless"
+def _surface_requires_presentation(goal: GoalSnapshot) -> bool:
+    """Fail open when the creating app-server client cannot present a successor."""
 
-
-def _presentation_ack_path(
-    repo: Path,
-    source_session_id: str,
-    chain_id: str,
-    sequence: int,
-) -> Path:
-    digest = hashlib.sha256(
-        f"{source_session_id}\0{chain_id}\0{sequence}".encode("utf-8")
-    ).hexdigest()[:24]
-    return repo / ".omx" / "state" / "relay" / f"{digest}.presentation.json"
+    return not (
+        goal.source in {"cli", "exec", "appServer"}
+        or (isinstance(goal.source, str) and goal.source.startswith("custom:relay"))
+    )
 
 
 def _resolve_chain(
@@ -1107,13 +1145,10 @@ def _trip_circuit_breaker(
     objective: str,
     chain: Mapping[str, Any],
     files: str,
-    ratio: float,
-    threshold: float,
     progress_fingerprint: str,
     no_progress_count: int,
     failure_count: int,
     failure: str,
-    codex_binary: Path | None,
 ) -> None:
     circuit_state = _circuit_breaker_state(
         state=state,
@@ -1121,8 +1156,6 @@ def _trip_circuit_breaker(
         objective=objective,
         chain=chain,
         files=files,
-        ratio=ratio,
-        threshold=threshold,
         progress_fingerprint=progress_fingerprint,
         no_progress_count=no_progress_count,
         failure_count=failure_count,
@@ -1142,29 +1175,8 @@ def _trip_circuit_breaker(
     state_path, _ = _state_paths(repo, session_id)
     _write_state(state_path, circuit_state)
 
-    binary = codex_binary or _codex_binary()
-    updated = dict(circuit_state)
-    if binary is None:
-        updated["goal_status"] = "block_unavailable"
-    else:
-        try:
-            set_thread_goal_status(
-                cwd=repo,
-                thread_id=session_id,
-                status="blocked",
-                codex_binary=binary,
-            )
-        except Exception as error:
-            updated["goal_status"] = "block_failed"
-            updated["goal_status_error"] = _bounded(str(error), MAX_PROGRESS_CHARS)
-        else:
-            updated["goal_status"] = "blocked"
-    _write_state(state_path, updated)
-
-    # Mark the current Goal blocked before cleaning the chain. The worker that
-    # owns this destination is allowed to observe that terminal state and exit
-    # normally; killing it first would also kill the hook that is performing
-    # the safety transition. Older/other chain workers are still terminated.
+    # Opening Relay's circuit must not block the Goal. Future PreCompact events
+    # fail open so Codex can compact normally.
     cleanup_workers(
         repo,
         chain_id=chain["chain_id"],
@@ -1179,8 +1191,6 @@ def _circuit_breaker_state(
     objective: str,
     chain: Mapping[str, Any],
     files: str,
-    ratio: float,
-    threshold: float,
     progress_fingerprint: str,
     no_progress_count: int,
     failure_count: int,
@@ -1201,8 +1211,6 @@ def _circuit_breaker_state(
             "relay_sequence": chain["source_sequence"],
             "original_title": chain["original_title"],
             "relevant_files": files,
-            "context_used": round(ratio, 6),
-            "threshold": threshold,
             "progress_fingerprint": progress_fingerprint,
             "no_progress_count": no_progress_count,
             "handoff_failure_count": failure_count,
@@ -1296,6 +1304,7 @@ def cleanup_workers(
     skipped: list[int] = []
     matching_states: list[tuple[Path, dict[str, Any]]] = []
     worker_pids: set[int] = set()
+    worker_outcome_paths: dict[int, Path] = {}
     protected_worker_pids: set[int] = set()
     for path in _state_files(repo):
         state = _read_state(path)
@@ -1319,43 +1328,86 @@ def cleanup_workers(
         matching_states.append((path, state))
         pid = _int_value(state.get("worker_pid"))
         outcome_path = state.get("outcome_path")
-        outcome: dict[str, Any] | None = None
-        if isinstance(outcome_path, str):
-            outcome = _read_state(Path(outcome_path))
-            if outcome is None or outcome.get("status") == "running":
-                _write_state(
-                    Path(outcome_path),
-                    {
-                        "status": "cancelled",
-                        "error": "Relay worker cancelled by terminal source path",
-                        "worker_pid": pid,
-                        "thread_id": state.get("destination_thread_id"),
-                        "turn_id": state.get("destination_turn_id"),
-                    },
-                )
+        outcome = _read_state(Path(outcome_path)) if isinstance(outcome_path, str) else None
         if pid is not None and (
             state.get("status") in {"starting", "running"}
             or (outcome is not None and outcome.get("status") == "running")
         ):
             worker_pids.add(pid)
+            if isinstance(outcome_path, str):
+                worker_outcome_paths.setdefault(pid, Path(outcome_path))
     worker_pids.update(
         _worker_pids(repo, chain_id=chain_id, session_id=session_id)
     )
     worker_pids.difference_update(protected_worker_pids)
     for pid in sorted(worker_pids):
-        if stop_worker_pid(pid, repo=repo):
+        stopped = stop_worker_pid(pid, repo=repo)
+        if not stopped:
+            outcome_path = worker_outcome_paths.get(pid)
+            if outcome_path is not None:
+                stopped = stop_worker_group(
+                    pid,
+                    repo=repo,
+                    outcome_path=outcome_path,
+                )
+        if stopped or not _pid_is_alive(pid):
             cleaned.append(pid)
         else:
             skipped.append(pid)
     for path, state in matching_states:
-        if state.get("status") in {"starting", "running"}:
+        if state.get("status") in {"starting", "running", "cleanup_failed"}:
             updated = dict(state)
+            state_pid = _int_value(state.get("worker_pid"))
+            outcome_path = state.get("outcome_path")
+            outcome = _read_state(Path(outcome_path)) if isinstance(outcome_path, str) else None
+            if state_pid in skipped:
+                updated.update(
+                    {
+                        "status": "cleanup_failed",
+                        "cleanup": "worker_still_live",
+                        "updated_at": _timestamp(),
+                    }
+                )
+                _write_state(path, updated)
+                continue
+            if (
+                state.get("status") == "cleanup_failed"
+                and outcome is not None
+                and outcome.get("status") == "completed"
+                and outcome.get("worker_pid") == state_pid
+                and outcome.get("thread_id") == state.get("destination_thread_id")
+                and outcome.get("turn_id") == state.get("destination_turn_id")
+            ):
+                updated.update(
+                    {
+                        "status": "running",
+                        "cleanup": "destination_completed",
+                        "updated_at": _timestamp(),
+                    }
+                )
+                _write_state(path, updated)
+                continue
+            if (
+                isinstance(state.get("outcome_path"), str)
+                and (state_pid in cleaned or state_pid not in worker_pids)
+                and (outcome is None or outcome.get("status") == "running")
+            ):
+                _write_state(
+                    Path(state["outcome_path"]),
+                    {
+                        "status": "cancelled",
+                        "error": "Relay worker cancelled by terminal source path",
+                        "worker_pid": state_pid,
+                        "thread_id": state.get("destination_thread_id"),
+                        "turn_id": state.get("destination_turn_id"),
+                    },
+                )
             updated.update(
                 {
                     "status": "cancelled",
                     "cleanup": (
                         "worker_terminated"
-                        if any(pid in cleaned for pid in worker_pids)
+                        if state_pid in cleaned
                         else "worker_not_found"
                     ),
                     "updated_at": _timestamp(),
@@ -1537,7 +1589,7 @@ def _is_control_operation(payload: Mapping[str, Any]) -> bool:
 
 def _is_terminal_control(payload: Mapping[str, Any]) -> bool:
     values: list[str] = []
-    for key in ("tool_name", "operation", "method", "command_name"):
+    for key in ("tool_name", "operation", "method", "command_name", "action", "status", "state"):
         value = payload.get(key)
         if isinstance(value, str):
             values.append(value)
@@ -1609,11 +1661,74 @@ def _destination_failure(state: Mapping[str, Any]) -> str | None:
         if status == "failed":
             return str(outcome.get("error") or "destination worker failed")
         if status == "completed":
-            return None
+            if (
+                outcome.get("thread_id") == state.get("destination_thread_id")
+                and outcome.get("turn_id") == state.get("destination_turn_id")
+            ):
+                return None
+            return "destination completion identity did not match Relay state"
+        if status != "running":
+            return "destination outcome has an invalid status"
     pid = state.get("worker_pid")
     if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+        if outcome is None or outcome.get("worker_pid") != pid:
+            return "destination worker outcome did not match Relay state"
         if not _pid_is_alive(pid):
+            time.sleep(0.05)
+            latest = _read_state(Path(value)) if isinstance(value, str) else None
+            if (
+                latest is not None
+                and latest.get("status") == "completed"
+                and latest.get("thread_id") == state.get("destination_thread_id")
+                and latest.get("turn_id") == state.get("destination_turn_id")
+            ):
+                return None
             return "destination worker exited before reporting completion"
+        return None
+    return "destination worker evidence is missing"
+
+
+def _running_state_failure(
+    state: Mapping[str, Any],
+    *,
+    repo: Path,
+    session_id: str,
+) -> str | None:
+    destination = _string_value(state.get("destination_thread_id"))
+    turn = _string_value(state.get("destination_turn_id"))
+    if state.get("source_session_id") != session_id:
+        return "running state source identity did not match the hook session"
+    if state.get("cwd") != str(repo):
+        return "running state repository did not match the hook repository"
+    if destination is None or destination == session_id or turn is None:
+        return "running state destination identity is incomplete"
+    pid = _int_value(state.get("worker_pid"))
+    source_sequence = _int_value(state.get("relay_sequence"))
+    outcome_path = _string_value(state.get("outcome_path"))
+    if (
+        pid is None
+        or outcome_path is None
+        or not _string_value(state.get("relay_chain_id"))
+        or source_sequence is None
+        or _int_value(state.get("destination_relay_sequence")) != source_sequence + 1
+    ):
+        return "running state worker evidence is incomplete"
+    outcome = _read_state(Path(outcome_path))
+    if outcome is None:
+        return "running state worker outcome is missing"
+    if outcome.get("status") == "completed":
+        if outcome.get("worker_pid") != pid:
+            return "completed outcome worker identity did not match Relay state"
+        if _pid_is_alive(pid) and not worker_pid_is_relay(pid, repo=repo):
+            # The worker can exit between the liveness and command checks
+            # immediately after writing its completed outcome. Recheck before
+            # classifying the PID as a foreign live process.
+            if _pid_is_alive(pid) and not worker_pid_is_relay(pid, repo=repo):
+                return "completed outcome worker is not a live Relay worker"
+    if outcome.get("status") == "running" and _pid_is_alive(pid):
+        if not worker_pid_is_relay(pid, repo=repo):
+            if _pid_is_alive(pid) and not worker_pid_is_relay(pid, repo=repo):
+                return "running state worker is not a live Relay worker"
     return None
 
 
@@ -1642,6 +1757,8 @@ def _quiesce(event: str, state: Mapping[str, Any]) -> dict[str, Any]:
     thread_id = state.get("destination_thread_id")
     suffix = f" Destination thread: {thread_id}." if thread_id else ""
     reason = "Relay started a fresh successor thread; the predecessor is quiesced." + suffix
+    if event == "PreCompact":
+        return {"continue": False, "stopReason": reason}
     if event == "UserPromptSubmit":
         return {
             "continue": False,
@@ -1720,14 +1837,6 @@ def _bounded(value: str, limit: int) -> str:
     return value[:limit]
 
 
-def _valid_threshold(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) and 0 <= float(value) <= 1
-
-
-def _valid_ratio(value: object) -> bool:
-    return _valid_threshold(value)
-
-
 def _timeout(name: str, default: float) -> float:
     value = os.environ.get(name)
     if value is None:
@@ -1754,21 +1863,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--stdin-json", action="store_true")
-    parser.add_argument("--handoff-threshold", "--threshold", type=float, default=DEFAULT_THRESHOLD)
     parser.add_argument(
         "--official-hook-event",
-        choices=("UserPromptSubmit", "PreToolUse", *sorted(TERMINAL_EVENTS)),
+        choices=("PreCompact", "UserPromptSubmit", "PreToolUse", *sorted(TERMINAL_EVENTS)),
         required=True,
     )
-    parser.add_argument("--context-used", type=float)
     args = parser.parse_args()
     payload = _payload() if args.stdin_json else {}
     response = handle_hook(
         repo=args.repo,
         event=args.official_hook_event,
         payload=payload,
-        threshold=args.handoff_threshold,
-        context_used=args.context_used,
         transport_enabled=os.environ.get("RELAY_CODEX_APP_TRANSPORT") != "disabled",
     )
     print(json.dumps(response, separators=(",", ":")))

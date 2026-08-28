@@ -34,6 +34,6 @@ body:
     attributes:
       label: Constraints
       options:
-        - label: Preserves the 30% threshold contract
+        - label: Preserves auto-only PreCompact and fail-open native compaction
         - label: Does not require committing raw runtime state
         - label: Keeps host-specific behavior at the integration edge

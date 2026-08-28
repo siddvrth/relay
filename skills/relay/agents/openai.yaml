@@ -1,4 +1,4 @@
 interface:
   display_name: "Relay"
   short_description: "Automatic fresh-thread Goal continuity"
-  default_prompt: "Relay automatically starts a fresh Codex thread at 30% context usage, restores the current Goal objective, and continues from live repository state."
+  default_prompt: "Relay attempts a verified fresh Codex Goal continuation at automatic compaction and fails open to native compaction when it cannot hand off safely."

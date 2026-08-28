@@ -1,88 +1,99 @@
 # Relay
 
-Relay keeps long-running Codex Goals moving when context gets crowded. At the
-default 30% occupancy threshold, its plugin hooks start a genuinely fresh
-Codex app-server thread in the same repository, restore the current Goal
-objective, and continue with a compact live-repository prompt.
+Relay is an experimental fresh-thread alternative to automatic compaction for
+long-running Codex Goals. When Codex reaches `PreCompact` with `trigger: auto`,
+Relay attempts a genuinely fresh `thread/start` continuation. It stops the
+source compaction only after the destination Goal is restored, the explicit
+continuation turn is observed as started, and the destination IDs are bound to
+durable Relay state. If any required step fails, Relay returns control and
+Codex compacts normally.
 
-Relay preserves the effective model, personality, approval reviewer/policy,
-and equivalent sandbox behavior exposed at the source hook boundary. It also
-requests the source effort and summary on the explicit
-continuation turn. Provider identity and active permission-profile provenance
-are not exposed by the hook payload, so Relay does not claim to preserve them.
-It only relays an active Goal; unavailable Goal or settings reads fail open for
-a later retry.
+Explicit manual `/compact` is never matched. It remains the user's same-thread
+escape hatch.
 
-The source thread is quiesced through the supported hook responses only after
-the destination is acknowledged. Goal-control, cancel, stop, and shutdown
-operations bypass Relay's quiescence decision. `SessionEnd` cleans Relay worker
-process groups; repeated unchanged progress trips a circuit breaker instead of
-creating an unbounded chain.
+Relay carries only bounded deterministic context: the exact Goal objective,
+the current user request when present in the hook transcript, recent agent
+progress, repository path, changed-file hint, and chain identity. The live
+repository remains authoritative. Relay never calls `thread/fork` and does not
+copy the transcript.
 
-Destinations are named `Relay II: <original title>`, `Relay III: <original
-title>`, and so on. Each state record carries one stable chain ID and sequence.
-The destination is created with `thread/start`, never `thread/fork`, so it does
-not inherit the predecessor conversation.
+## Safety contract
 
-## Install
+- Only `PreCompact(auto)` can launch a successor.
+- `UserPromptSubmit` and `PreToolUse` are guard-only hooks that quiesce an
+  acknowledged predecessor; Goal control, cancel, stop, and shutdown escape.
+- The destination Goal is restored paused, Relay starts and observes its
+  bounded explicit turn, then reactivates the Goal. This avoids racing Codex's
+  host-owned automatic Goal continuation.
+- Model, personality, approval policy/reviewer, reasoning effort, summary,
+  service tier, and the current named permission profile or sandbox projection
+  are forwarded when exposed by the source turn context.
+- Duplicate hooks serialize on one source lock. Stale running state is rejected,
+  worker cleanup is process-group scoped, and repeated failures open Relay's
+  circuit without blocking the Goal or native compaction.
 
-Relay is a current Codex plugin release candidate. This source checkout does
-not publish a marketplace selector. Install it using the real selector from a
-marketplace that has packaged this repository; do not substitute a placeholder
-name. Development installs are exercised from a temporary local marketplace by
-`bash validate.sh`.
+## Desktop boundary
 
-Review and trust the bundled hooks in `/hooks` after installation. Hook trust is
-controlled by Codex; installing a plugin does not silently grant hook execution.
+Current Codex app-server exposes no supported Desktop present/select/focus RPC,
+and an already-running Desktop does not reliably reconcile threads created by a
+separate app-server client. The current Desktop source is `vscode`, so Relay
+treats `vscode` and unknown host sources as requiring presentation and fails
+open before creating a destination.
+It does not use deep links, UI automation, internal IPC, synthetic presenters,
+or application restarts.
 
-## Verify
+CLI/exec and explicitly app-server-created threads are headless paths. Other
+host surfaces remain native-compaction-only until Codex exposes a supported
+presentation acknowledgement.
+
+## Compatibility
+
+Relay requires Python 3.10 or newer. The hook checks the interpreter before it
+runs and reports an actionable diagnostic before failing open if no supported
+interpreter is available. Set `RELAY_PYTHON` to the path of a supported Python
+executable when `python3` is not the right interpreter.
+
+The v0.6.0 release checks used Codex CLI 0.149.1 for clean plugin installation
+and hook-contract validation. CLI/exec and explicitly app-server-created
+threads are the supported headless paths. Codex Desktop is not supported in
+this release: its current `vscode` source fails open to native compaction
+because Relay has no supported presentation acknowledgement. Other Codex
+versions are unverified.
+
+## Local state and deletion
+
+Relay keeps bounded, local handoff metadata under `.omx/state/relay/`, including
+Goal and repository identifiers, chain/status/progress data, and worker
+outcomes. It does not store full transcripts. The directory is ignored by Git,
+is not automatically expired, and should be treated as sensitive while it is
+present.
+
+To clear a repository's Relay state, first stop any Relay worker, then move
+`.omx/state/relay/` to your operating system's Trash (on macOS, use Finder or
+the `trash` utility). A later handoff starts without the removed local record.
+
+## Install and verify
+
+This checkout does not advertise a fabricated marketplace selector. Install
+the package through the real marketplace that publishes it, then review and
+trust the bundled hooks. Installing or enabling a plugin does not automatically
+trust its hook definitions.
 
 ```bash
-python3 skills/relay/scripts/test_context_usage.py
 python3 skills/relay/scripts/test_relay.py
 bash validate.sh
 ```
 
-The authenticated real smoke installs Relay into an isolated Codex home,
-trusts the exact installed hook hashes, and proves automatic A → B → C relay,
-real work in B, Goal/settings preservation, and duplicate suppression:
+The authenticated isolated-home smoke proves a real A → B → C chain, real work
+in B, Goal/settings preservation, worker cleanup, and duplicate suppression:
 
 ```bash
 python3 skills/relay/scripts/smoke_codex_app_transport.py
 ```
 
-## Behavior
+The smoke defaults to `gpt-5.6-luna`; set `RELAY_SMOKE_MODEL` to a model
+available to your Codex account when running it locally.
 
-Installed Relay hooks read the latest exact Codex transcript token-count
-record exposed by `transcript_path`. Direct `thread/tokenUsage/updated`
-notifications are accepted only by the parser's diagnostic/test surface.
-Unknown or missing telemetry fails open. One small atomic JSON record plus a
-worker outcome record per source thread provide duplicate suppression and
-destination lifecycle completion; no transcript is copied and no manual state
-seed is required. Runtime state also records the chain ID, sequence, original
-title, progress fingerprint, and presentation status.
-
-For a Desktop handoff, set `RELAY_DESKTOP_HANDOFF=1` and provide
-`RELAY_DESKTOP_PRESENTATION_COMMAND`. This is a host dependency: the current
-Codex app-server exposes no supported Desktop focus/select request, so Relay
-does not claim automatic Desktop visibility in a normal install without it.
-The bridge receives a JSON request on stdin, opens/selects the exact
-`codex://threads/<thread-id>` destination through a supported host mechanism,
-verifies the exact selected destination, and writes `RELAY_DESKTOP_ACK_PATH`
-containing `presented: true`, the exact `selected_thread_id`, `thread_id`,
-`turn_id`, `source_thread_id`, `chain_id`, and `relay_sequence`. Without that
-proof the handoff fails open and the source remains usable. Persistence,
-`thread/read`, or `thread/loaded/list` alone are not Desktop visibility
-evidence.
-
-`/compact` keeps the same thread and summarizes earlier conversation. Relay
-adds fresh-thread startup overhead in exchange for a new context window and a
-short live-repository continuation. Both approaches still require the
-destination/current thread to inspect the work and validate the final result.
-
-## Development
-
-Relay uses only the Python standard library and Bash. The package surface is
-`hooks/`, `.codex-plugin/`, and `skills/relay/`. Run `bash validate.sh` before
-publishing a change. The release policy intentionally makes no token-efficiency
-or cost-savings claim.
+Relay uses only Python's standard library and Bash. Its release policy remains
+`experimental_non_claim`: it makes no token-efficiency, cost-savings, or
+quality-superiority claim over native compaction.

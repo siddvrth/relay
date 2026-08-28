@@ -28,8 +28,8 @@ Do not commit raw transcripts, continuation state, or private paths from unrelat
 
 ## Review Checklist
 
-- Does the change preserve below/equal/above 30% behavior?
+- Does only `PreCompact(auto)` launch while manual `/compact` remains native?
 - Does a successful destination use `thread/start`, restore the Goal, and avoid `thread/fork`?
 - Does one source thread deduplicate while A-to-B-to-C remains repeatable?
-- Do malformed or unavailable telemetry and failed launches fail open?
+- Do malformed hook data, unavailable state, and failed launches fail open?
 - Does `bash validate.sh` exercise the clean plugin install path?
