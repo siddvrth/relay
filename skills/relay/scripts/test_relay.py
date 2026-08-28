@@ -956,6 +956,102 @@ class RelayTests(unittest.TestCase):
                     pass
                 worker.wait()
 
+    def test_orphaned_worker_group_is_killed_after_leader_exit(self) -> None:
+        fake_server = self.root / "orphan-hanging-codex"
+        child_pid_path = self.root / "orphan-child.pid"
+        fake_server.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os\n"
+            "import pathlib\n"
+            "import time\n"
+            "pathlib.Path(os.environ['FAKE_CHILD_PID']).write_text(str(os.getpid()), encoding='utf-8')\n"
+            "for _line in __import__('sys').stdin:\n"
+            "    time.sleep(60)\n",
+            encoding="utf-8",
+        )
+        fake_server.chmod(fake_server.stat().st_mode | stat.S_IXUSR)
+        cleanup_repo = self.repo.resolve()
+        request = cleanup_repo / ".omx/state/relay/.request-orphan-cleanup.json"
+        outcome = cleanup_repo / ".omx/state/relay/orphan-cleanup.outcome.json"
+        state_path, _ = relay._state_paths(cleanup_repo, "orphan-cleanup")
+        request.parent.mkdir(parents=True, exist_ok=True)
+        request.write_text(
+            json.dumps(
+                {
+                    "cwd": str(self.repo.resolve()),
+                    "continuation_prompt": "continue",
+                    "codex_binary": str(fake_server),
+                    "goal_objective": "Finish cleanup",
+                    "goal_status": "active",
+                    "goal_token_budget": None,
+                    "settings": {},
+                    "outcome_path": str(outcome),
+                    "response_timeout": 30,
+                    "turn_timeout": 30,
+                }
+            ),
+            encoding="utf-8",
+        )
+        read_fd, write_fd = os.pipe()
+        worker_env = os.environ.copy()
+        worker_env["FAKE_CHILD_PID"] = str(child_pid_path)
+        worker = subprocess.Popen(
+            [
+                relay.sys.executable,
+                str(Path(relay.__file__).with_name("codex_app_transport.py")),
+                "--worker-request",
+                str(request),
+                "--ack-fd",
+                str(write_fd),
+            ],
+            cwd=cleanup_repo,
+            env=worker_env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            pass_fds=(write_fd,),
+            start_new_session=True,
+        )
+        os.close(write_fd)
+        os.close(read_fd)
+        relay._write_state(
+            state_path,
+            {
+                "status": "running",
+                "source_session_id": "orphan-cleanup",
+                "worker_pid": worker.pid,
+                "outcome_path": str(outcome),
+            },
+        )
+        child_pid: int | None = None
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not child_pid_path.exists():
+                time.sleep(0.02)
+            child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+            self.assertTrue(relay._pid_is_alive(child_pid))
+            os.kill(worker.pid, signal.SIGKILL)
+            worker.wait(timeout=5)
+            result = relay.cleanup_workers(cleanup_repo)
+            self.assertIn(worker.pid, result["cleaned"])
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and relay._pid_is_alive(child_pid):
+                time.sleep(0.02)
+            self.assertFalse(relay._pid_is_alive(child_pid))
+            self.assertEqual(json.loads(outcome.read_text(encoding="utf-8"))["status"], "cancelled")
+        finally:
+            if worker.poll() is None:
+                try:
+                    os.kill(worker.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                worker.wait()
+            if child_pid is not None and relay._pid_is_alive(child_pid):
+                try:
+                    os.killpg(worker.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
     def test_failed_handoff_cleanup_stops_recorded_worker_before_retry(self) -> None:
         state_path, _ = relay._state_paths(self.repo, "failed-cleanup")
         outcome_path = state_path.with_suffix(".outcome.json")

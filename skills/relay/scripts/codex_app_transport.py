@@ -157,6 +157,8 @@ def _worker_main(request_path: Path, ack_fd: int) -> int:
                         "worker_pid": os.getpid(),
                         "worker_pgid": os.getpid(),
                         "cwd": payload.get("cwd") if isinstance(payload, dict) else None,
+                        "codex_binary": payload.get("codex_binary") if isinstance(payload, dict) else None,
+                        "request_path": str(request_path),
                     },
                 )
             config = _config_from_json(payload)
@@ -320,20 +322,44 @@ def stop_worker_pid(
 
     if pid <= 0 or not _is_relay_worker(pid, repo):
         return False
+    return _terminate_process_group(pid, timeout=timeout)
+
+
+def stop_worker_group(
+    pid: int,
+    *,
+    repo: Path,
+    outcome_path: Path | None = None,
+    timeout: float = 5.0,
+) -> bool:
+    """Terminate an orphaned Relay process group after validating its outcome."""
+
+    if pid <= 0:
+        return False
+    if not _is_relay_worker(pid, repo) and not _is_relay_worker_group(
+        pid,
+        repo,
+        outcome_path,
+    ):
+        return False
+    return _terminate_process_group(pid, timeout=timeout)
+
+
+def _terminate_process_group(pid: int, *, timeout: float) -> bool:
     try:
         os.killpg(pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
         return False
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not _pid_exists(pid):
+        if not _process_group_exists(pid):
             return True
         time.sleep(0.05)
     try:
         os.killpg(pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         pass
-    return not _pid_exists(pid)
+    return not _process_group_exists(pid)
 
 
 def worker_pid_is_relay(pid: int, *, repo: Path) -> bool:
@@ -356,6 +382,77 @@ def _is_relay_worker(pid: int, repo: Path | None) -> bool:
     if repo is None:
         return True
     return any(candidate in command for candidate in {str(repo), str(repo.resolve())})
+
+
+def _is_relay_worker_group(
+    pid: int,
+    repo: Path,
+    outcome_path: Path | None,
+) -> bool:
+    if outcome_path is None or not outcome_path.is_absolute():
+        return False
+    try:
+        outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(outcome, dict):
+        return False
+    if (
+        outcome.get("worker_pid") != pid
+        or outcome.get("worker_pgid") != pid
+        or outcome.get("cwd") not in {str(repo), str(repo.resolve())}
+    ):
+        return False
+    request_path = outcome.get("request_path")
+    codex_binary = outcome.get("codex_binary")
+    if (
+        not isinstance(request_path, str)
+        or not Path(request_path).is_absolute()
+        or not Path(request_path).is_file()
+        or not isinstance(codex_binary, str)
+        or not codex_binary
+    ):
+        return False
+    for member_pid, member_pgid, stat, command in _process_group_entries(pid):
+        if (
+            member_pgid == pid
+            and member_pid != pid
+            and not stat.startswith("Z")
+            and codex_binary in command
+            and ("app-server" in command or "--stdio" in command)
+        ):
+            return True
+    return False
+
+
+def _process_group_entries(pgid: int) -> list[tuple[int, int, str, str]]:
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,pgid=,stat=,command="],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    entries: list[tuple[int, int, str, str]] = []
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(None, 3)
+        if len(fields) != 4:
+            continue
+        try:
+            member_pid = int(fields[0])
+            member_pgid = int(fields[1])
+        except ValueError:
+            continue
+        if member_pgid == pgid:
+            entries.append((member_pid, member_pgid, fields[2], fields[3]))
+    return entries
+
+
+def _process_group_exists(pgid: int) -> bool:
+    return any(not stat.startswith("Z") for _, _, stat, _ in _process_group_entries(pgid))
 
 
 def _pid_exists(pid: int) -> bool:

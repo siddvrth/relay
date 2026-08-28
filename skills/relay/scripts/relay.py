@@ -27,6 +27,7 @@ from codex_app_transport import (
     LaunchConfig,
     launch,
     stop_worker_pid,
+    stop_worker_group,
     worker_pid_is_relay,
 )
 
@@ -1262,6 +1263,7 @@ def cleanup_workers(
     skipped: list[int] = []
     matching_states: list[tuple[Path, dict[str, Any]]] = []
     worker_pids: set[int] = set()
+    worker_outcome_paths: dict[int, Path] = {}
     protected_worker_pids: set[int] = set()
     for path in _state_files(repo):
         state = _read_state(path)
@@ -1291,12 +1293,23 @@ def cleanup_workers(
             or (outcome is not None and outcome.get("status") == "running")
         ):
             worker_pids.add(pid)
+            if isinstance(outcome_path, str):
+                worker_outcome_paths.setdefault(pid, Path(outcome_path))
     worker_pids.update(
         _worker_pids(repo, chain_id=chain_id, session_id=session_id)
     )
     worker_pids.difference_update(protected_worker_pids)
     for pid in sorted(worker_pids):
-        if stop_worker_pid(pid, repo=repo) or not _pid_is_alive(pid):
+        stopped = stop_worker_pid(pid, repo=repo)
+        if not stopped:
+            outcome_path = worker_outcome_paths.get(pid)
+            if outcome_path is not None:
+                stopped = stop_worker_group(
+                    pid,
+                    repo=repo,
+                    outcome_path=outcome_path,
+                )
+        if stopped or not _pid_is_alive(pid):
             cleaned.append(pid)
         else:
             skipped.append(pid)
