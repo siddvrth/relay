@@ -4,7 +4,7 @@
 
 - Narrowed Relay's supported product surface to interactive Codex CLI and
   `codex exec`; unsupported roots now fail open generically.
-- Removed the source/presentation compatibility path and retained local
+- Removed the legacy source-admission compatibility path and retained local
   app-server stdio only as the internal continuation mechanism.
 - Added coverage for `exec` roots, generic unsupported roots, and Relay-owned
   successors whose internal source metadata is not a user-originated source.

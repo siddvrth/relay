@@ -119,6 +119,20 @@ def handle_hook(
         return _allow(event)
 
     state_path, lock_path = _state_paths(repo, session_id)
+    preflight_goal: GoalSnapshot | None = None
+    if event != "PreCompact" and not state_path.exists():
+        return _allow(event)
+    if event == "PreCompact" and not state_path.exists():
+        parent_state = _find_parent_state(repo, session_id)
+        if parent_state is None:
+            if not transport_enabled:
+                return _allow(event)
+            binary = codex_binary or _codex_binary()
+            if binary is None:
+                return _allow(event)
+            preflight_goal = _read_goal(repo, session_id, binary)
+            if preflight_goal is None or not _is_supported_cli_root(preflight_goal):
+                return _allow(event)
     acknowledged_worker_pid: int | None = None
     acknowledged_destination_thread_id: str | None = None
     acknowledged_destination_turn_id: str | None = None
@@ -278,7 +292,7 @@ def handle_hook(
             if binary is None:
                 return _allow(event)
 
-            goal = _read_goal(repo, session_id, binary)
+            goal = preflight_goal or _read_goal(repo, session_id, binary)
             if goal is None:
                 return _allow(event)
             if goal.status != "active":

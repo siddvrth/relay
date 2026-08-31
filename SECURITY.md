@@ -5,7 +5,7 @@ Relay does not automatically expire these records. Stop any Relay worker before
 moving the repository's `.omx/state/relay/` directory to the operating system's
 Trash when you want to remove the local handoff state.
 
-## Supported Surface
+## Shipped Components
 
 - `skills/relay/scripts/relay.py`
 - `skills/relay/scripts/codex_app_transport.py`
@@ -32,7 +32,7 @@ Do not place these in committed artifacts:
 - raw dirty working-tree state from unrelated repositories
 
 The scripts read only documented Relay settings and the normal Codex environment needed by
-`codex app-server`.
+the internal `codex app-server` continuation process.
 
 ## Security Model
 

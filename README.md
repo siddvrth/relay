@@ -45,10 +45,9 @@ After a verified handoff, the destination is Relay-owned. Its next handoff is
 admitted from the durable Relay parent record, independent of whatever source
 label Codex gives that internally created thread.
 
-Relay invokes the local `codex app-server --stdio` protocol only as the internal
-mechanism for reading Goals, creating and verifying fresh threads, and starting
-continuation turns. Running an app-server client separately is not a supported
-Relay user-facing mode.
+Relay's only supported user-facing environment is Codex CLI. Internally, it
+invokes the local `codex app-server --stdio` protocol to read Goals, create and
+verify fresh threads, and start continuation turns.
 
 ## Compatibility
 

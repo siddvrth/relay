@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a host integration, runtime behavior, or documentation improvement.
+description: Propose a Codex CLI workflow, runtime behavior, or documentation improvement.
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
@@ -9,7 +9,7 @@ body:
       label: Area
       options:
         - Runtime behavior
-        - Host integration
+        - Codex CLI workflow
         - Documentation
         - Validation
         - Artifact hygiene
@@ -36,4 +36,4 @@ body:
       options:
         - label: Preserves auto-only PreCompact and fail-open native compaction
         - label: Does not require committing raw runtime state
-        - label: Keeps host-specific behavior at the integration edge
+        - label: Keeps the supported product surface CLI-only

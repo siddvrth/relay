@@ -51,9 +51,9 @@ Relay-owned successors are admitted through their durable Relay parent record,
 so their next handoff does not depend on the source label attached to an
 internally created thread.
 
-Relay uses the local `codex app-server --stdio` protocol internally to inspect
-Goals, create fresh threads, restore settings, and verify continuation turns.
-That implementation transport is not a separate supported user-facing mode.
+Codex CLI is Relay's only supported user-facing environment. Relay uses the
+local `codex app-server --stdio` protocol internally to inspect Goals, create
+fresh threads, restore settings, and verify continuation turns.
 
 ## Compatibility and state
 

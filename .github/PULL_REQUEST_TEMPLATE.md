@@ -13,7 +13,7 @@
 
 - [ ] `bash validate.sh`
 - [ ] Clean plugin install checked
-- [ ] Real local app-server smoke checked where available
+- [ ] Real authenticated CLI/headless smoke checked where available
 
 # Checklist
 

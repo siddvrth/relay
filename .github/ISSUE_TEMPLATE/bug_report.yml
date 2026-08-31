@@ -9,8 +9,8 @@ body:
       label: Surface
       options:
         - Skill / Python scripts
-        - Codex App handoff
-        - Codex CLI / OMX hook
+        - Codex CLI handoff / hook
+        - Internal continuation transport
         - Installation / audit
         - Documentation
         - Artifacts / privacy

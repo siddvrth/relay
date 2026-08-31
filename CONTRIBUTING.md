@@ -6,7 +6,7 @@ Relay is small on purpose. Contributions should preserve that shape.
 
 - Keep the package portable across repositories.
 - Prefer standard library Python and small Bash wrappers.
-- Do not add host-specific assumptions to the core scripts.
+- Keep the core scripts focused on the documented Codex CLI contract.
 - Keep raw runtime state out of git.
 - Validate before claiming completion.
 

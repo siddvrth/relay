@@ -144,18 +144,21 @@ FAKE_CODEX = textwrap.dedent(
                 send({"id": request_id, "result": {"thread": {"id": "wrong", "cwd": os.getcwd()}}})
                 continue
             source = os.environ.get("FAKE_CODEX_SOURCE", "cli")
+            source_value = (
+                None if os.environ.get("FAKE_CODEX_NO_SOURCE") == "1" else source
+            )
             if (
                 isinstance(params.get("threadId"), str)
                 and params["threadId"].startswith("thread-")
                 and os.environ.get("FAKE_CODEX_SUCCESSOR_SOURCE")
             ):
-                source = os.environ["FAKE_CODEX_SUCCESSOR_SOURCE"]
+                source_value = os.environ["FAKE_CODEX_SUCCESSOR_SOURCE"]
             send({"id": request_id, "result": {"thread": {
                 "id": params["threadId"],
                 "cwd": os.getcwd(),
                 "name": thread_name,
                 "preview": os.environ.get("FAKE_CODEX_TITLE", "Original Relay Goal"),
-                "source": source,
+                "source": source_value,
             }}})
         else:
             send({"id": request_id, "error": {"code": -32601, "message": method}})
@@ -587,7 +590,7 @@ class RelayTests(unittest.TestCase):
     def test_relay_owned_successor_can_continue_with_internal_source_metadata(self) -> None:
         with self.env(), mock.patch.dict(
             os.environ,
-            {"FAKE_CODEX_SUCCESSOR_SOURCE": "mcp"},
+            {"FAKE_CODEX_SUCCESSOR_SOURCE": "appServer"},
         ):
             first = self.call("A", ratio=0.31, turn_id="turn-A")
             self.outcome("A", status="completed")
@@ -643,7 +646,7 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(self.state(b)["destination_relay_sequence"], 3)
 
     def test_non_cli_root_fails_open_without_state_or_destination(self) -> None:
-        for source in ("mcp", "custom:external-client"):
+        for source in ("appServer", "custom:external-client", "unknown"):
             with self.subTest(source=source), self.env(), mock.patch.dict(
                 os.environ,
                 {"FAKE_CODEX_SOURCE": source},
@@ -652,9 +655,17 @@ class RelayTests(unittest.TestCase):
                 response = self.call(session)
             self.assertEqual(response, {"continue": True})
         self.assertFalse(any(item.get("method") == "thread/start" for item in self.log_entries()))
-        for source in ("mcp", "custom:external-client"):
+        for source in ("appServer", "custom:external-client", "unknown"):
             state_path, _ = relay._state_paths(self.repo, f"non-cli-{source}")
             self.assertFalse(state_path.exists())
+        self.assertFalse((self.repo / ".omx" / "state" / "relay").exists())
+
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"FAKE_CODEX_NO_SOURCE": "1"},
+        ):
+            self.assertEqual(self.call("non-cli-missing"), {"continue": True})
+        self.assertFalse((self.repo / ".omx" / "state" / "relay").exists())
 
     def test_mismatched_thread_metadata_fails_open(self) -> None:
         with self.env(), mock.patch.dict(

@@ -1,4 +1,4 @@
 interface:
   display_name: "Relay"
-  short_description: "Automatic fresh-thread Goal continuity"
-  default_prompt: "Relay attempts a verified fresh Codex Goal continuation at automatic compaction and fails open to native compaction when it cannot hand off safely."
+  short_description: "Verified fresh-thread Goal continuity for Codex CLI"
+  default_prompt: "Relay attempts a verified fresh Codex CLI Goal continuation at automatic compaction and fails open to native compaction when it cannot hand off safely."
