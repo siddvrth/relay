@@ -143,12 +143,19 @@ FAKE_CODEX = textwrap.dedent(
             if os.environ.get("FAKE_CODEX_BAD_THREAD_READ") == "1":
                 send({"id": request_id, "result": {"thread": {"id": "wrong", "cwd": os.getcwd()}}})
                 continue
+            source = os.environ.get("FAKE_CODEX_SOURCE", "cli")
+            if (
+                isinstance(params.get("threadId"), str)
+                and params["threadId"].startswith("thread-")
+                and os.environ.get("FAKE_CODEX_SUCCESSOR_SOURCE")
+            ):
+                source = os.environ["FAKE_CODEX_SUCCESSOR_SOURCE"]
             send({"id": request_id, "result": {"thread": {
                 "id": params["threadId"],
                 "cwd": os.getcwd(),
                 "name": thread_name,
                 "preview": os.environ.get("FAKE_CODEX_TITLE", "Original Relay Goal"),
-                "source": os.environ.get("FAKE_CODEX_SOURCE", "cli"),
+                "source": source,
             }}})
         else:
             send({"id": request_id, "error": {"code": -32601, "message": method}})
@@ -469,6 +476,71 @@ class RelayTests(unittest.TestCase):
             )
         )
 
+    def test_generated_continuation_carries_request_without_recursive_nesting(self) -> None:
+        request = "Review the release\nthen run the installed smoke."
+        continuation = relay._continuation(
+            repo=self.repo,
+            source_session_id="source",
+            objective="Finish the Relay release",
+            request=request,
+            files="none reported",
+            progress=None,
+            chain_id="relay-test-chain",
+            source_sequence=1,
+            destination_sequence=2,
+            original_title="Original Relay Goal",
+        )
+        self.assertEqual(continuation.count(relay.CONTINUATION_HEADER), 1)
+        self.assertEqual(relay._continuation_request(continuation), request)
+        self.transcript.write_text(
+            json.dumps(
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": continuation}],
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        context = relay._handoff_context({"transcript_path": str(self.transcript)})
+        self.assertEqual(context["current_request"], request)
+
+    def test_repository_progress_fingerprint_changes_when_worktree_changes(self) -> None:
+        before = relay._repository_fingerprint(self.repo)
+        changed = self.repo / "progress.txt"
+        changed.write_text("first\n", encoding="utf-8")
+        after = relay._repository_fingerprint(self.repo)
+        self.assertNotEqual(before, after)
+        changed.write_text("second content\n", encoding="utf-8")
+        self.assertNotEqual(after, relay._repository_fingerprint(self.repo))
+
+    def test_no_progress_ignores_volatile_assistant_messages(self) -> None:
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"RELAY_NO_PROGRESS_LIMIT": "2"},
+            clear=False,
+        ):
+            self.call("volatile-A", ratio=0.31)
+            self.outcome("volatile-A", status="completed")
+            destination = self.state("volatile-A")["destination_thread_id"]
+            original = self.transcript.read_text(encoding="utf-8")
+            self.transcript.write_text(original.replace("Remaining work:", "Changed work:"), encoding="utf-8")
+            self.call(destination, ratio=0.31)
+            self.outcome(destination, status="completed")
+            destination = self.state(destination)["destination_thread_id"]
+            self.transcript.write_text(original.replace("Remaining work:", "Different work:"), encoding="utf-8")
+            stopped = self.call(destination, ratio=0.31)
+        self.assertEqual(stopped, {"continue": True})
+        self.assertEqual(self.state(destination)["status"], "circuit_breaker")
+        self.assertEqual(
+            len([item for item in self.log_entries() if item.get("method") == "thread/start"]),
+            2,
+        )
+
     def test_repeated_no_progress_circuit_breaker_stops_chain(self) -> None:
         with self.env(), mock.patch.dict(
             os.environ,
@@ -512,8 +584,11 @@ class RelayTests(unittest.TestCase):
         self.assertIn("destination_not_fresh", state["error"])
         self.assertNotIn("destination_thread_id", state)
 
-    def test_actual_destination_b_relay_becomes_actual_destination_c(self) -> None:
-        with self.env():
+    def test_relay_owned_successor_can_continue_with_internal_source_metadata(self) -> None:
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"FAKE_CODEX_SUCCESSOR_SOURCE": "mcp"},
+        ):
             first = self.call("A", ratio=0.31, turn_id="turn-A")
             self.outcome("A", status="completed")
             b = self.state("A")["destination_thread_id"]
@@ -567,20 +642,21 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(self.state("A")["destination_relay_sequence"], 2)
         self.assertEqual(self.state(b)["destination_relay_sequence"], 3)
 
-    def test_app_server_surface_fails_open_without_supported_presentation(self) -> None:
-        for source in ("vscode", "unknown"):
+    def test_non_cli_root_fails_open_without_state_or_destination(self) -> None:
+        for source in ("mcp", "custom:external-client"):
             with self.subTest(source=source), self.env(), mock.patch.dict(
                 os.environ,
                 {"FAKE_CODEX_SOURCE": source},
             ):
-                response = self.call(f"surface-{source}")
+                session = f"non-cli-{source}"
+                response = self.call(session)
             self.assertEqual(response, {"continue": True})
         self.assertFalse(any(item.get("method") == "thread/start" for item in self.log_entries()))
-        for source in ("vscode", "unknown"):
-            state_path, _ = relay._state_paths(self.repo, f"surface-{source}")
+        for source in ("mcp", "custom:external-client"):
+            state_path, _ = relay._state_paths(self.repo, f"non-cli-{source}")
             self.assertFalse(state_path.exists())
 
-    def test_mismatched_source_thread_metadata_fails_open(self) -> None:
+    def test_mismatched_thread_metadata_fails_open(self) -> None:
         with self.env(), mock.patch.dict(
             os.environ,
             {"FAKE_CODEX_BAD_THREAD_READ": "1"},
@@ -588,6 +664,15 @@ class RelayTests(unittest.TestCase):
             response = self.call("mismatched-source")
         self.assertEqual(response, {"continue": True})
         self.assertFalse(any(item.get("method") == "thread/start" for item in self.log_entries()))
+
+    def test_exec_root_is_supported(self) -> None:
+        with self.env(), mock.patch.dict(
+            os.environ,
+            {"FAKE_CODEX_SOURCE": "exec"},
+        ):
+            response = self.call("exec-root")
+        self.assertIs(response["continue"], False)
+        self.assertEqual(self.state("exec-root")["status"], "running")
 
     def test_forced_failure_circuit_breaker_fails_open_without_blocking_goal(self) -> None:
         with self.env(), mock.patch.dict(

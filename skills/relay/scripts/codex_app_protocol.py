@@ -16,7 +16,7 @@ from codex_app_jsonrpc import AppServerClient, AppServerFailure, JsonObject
 CLIENT_INFO: Final[JsonObject] = {
     "name": "relay",
     "title": "Relay",
-    "version": "0.6.0",
+    "version": "0.7.0",
 }
 
 
@@ -301,7 +301,6 @@ def _goal_with_thread_metadata(goal: GoalSnapshot, result: JsonObject) -> GoalSn
         return goal
     title = thread.get("name")
     preview = thread.get("preview")
-    thread_source = thread.get("threadSource")
     return GoalSnapshot(
         thread_id=goal.thread_id,
         objective=goal.objective,
@@ -313,7 +312,7 @@ def _goal_with_thread_metadata(goal: GoalSnapshot, result: JsonObject) -> GoalSn
             if isinstance(preview, str) and preview.strip()
             else None
         ),
-        source=_effective_thread_source(thread.get("source"), thread_source),
+        source=_session_source(thread.get("source")),
     )
 
 
@@ -366,23 +365,12 @@ def _thread_start_params(config: ProtocolConfig) -> JsonObject:
     return params
 
 
-def _thread_source(value: object) -> str | None:
+def _session_source(value: object) -> str | None:
     if isinstance(value, str):
-        return value
+        return value.strip() or None
     if isinstance(value, dict) and isinstance(value.get("custom"), str):
         return f"custom:{value['custom']}"
     return None
-
-
-def _effective_thread_source(source: object, thread_source: object) -> str | None:
-    authoritative = _thread_source(source)
-    if authoritative in {"vscode", "unknown"}:
-        return authoritative
-    if thread_source in {"cli", "exec"}:
-        return thread_source
-    if isinstance(thread_source, str) and thread_source.startswith("relay"):
-        return "custom:relay"
-    return authoritative
 
 
 def _relay_state_path(cwd: Path, thread_id: str) -> Path:

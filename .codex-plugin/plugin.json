@@ -1,7 +1,7 @@
 {
   "name": "relay",
-  "version": "0.6.0",
-  "description": "Attempt a verified fresh-thread Goal continuation at automatic compaction, otherwise let Codex compact normally.",
+  "version": "0.7.0",
+  "description": "Experimental Codex CLI plugin for verified fresh-thread Goal continuity at automatic compaction.",
   "author": {
     "name": "siddvrth",
     "url": "https://github.com/siddvrth/relay"
@@ -20,8 +20,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Relay",
-    "shortDescription": "Automatic fresh-thread Goal continuity",
-    "longDescription": "At automatic Goal compaction, Relay attempts a genuinely fresh app-server continuation in the same repository and stops source compaction only after the handoff is verified. Failures defer to native compaction.",
+    "shortDescription": "Verified fresh-thread Goal continuity for Codex CLI",
+    "longDescription": "At automatic Goal compaction in Codex CLI, Relay attempts a genuinely fresh continuation in the same repository and stops source compaction only after the handoff is verified. Failures defer to native CLI compaction.",
     "developerName": "siddvrth",
     "websiteURL": "https://github.com/siddvrth/relay",
     "category": "Productivity",
@@ -30,7 +30,7 @@
       "Automation"
     ],
     "defaultPrompt": [
-      "Keep Relay enabled while this Goal runs; at automatic compaction it attempts a verified fresh continuation and otherwise lets Codex compact normally.",
+      "Keep Relay enabled in Codex CLI while this Goal runs; at automatic compaction it attempts a verified fresh continuation and otherwise lets native CLI compaction proceed.",
       "In a destination thread, inspect live repository state and continue the same Goal objective without relying on the predecessor transcript."
     ]
   }

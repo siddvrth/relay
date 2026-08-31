@@ -1,11 +1,13 @@
 ---
 name: relay
-description: Continue eligible long-running Codex Goals in a verified fresh thread at automatic compaction, while failing open to native compaction.
+description: Continue eligible long-running Codex CLI Goals in a verified fresh thread at automatic compaction, while failing open to native compaction.
 ---
 
 # Relay
 
-Relay is a Codex-only experimental alternative to automatic Goal compaction.
+Relay is an experimental Codex CLI plugin that replaces automatic Goal
+compaction at `PreCompact(auto)` with a verified fresh continuation when
+possible; otherwise native compaction proceeds normally.
 
 ## Automatic flow
 
@@ -20,10 +22,10 @@ For `PreCompact` with `trigger: auto`, Relay:
 5. Binds the exact destination thread/turn IDs to durable state and only then
    returns `continue: false` so Codex does not compact the predecessor.
 
-If any required step fails, Relay returns `continue: true` and Codex compacts
-normally. Manual `/compact`, inactive/terminal Goals, malformed input, missing
-settings, open circuit breakers, and surfaces without required presentation
-proof are fail-open paths.
+If any required step fails, Relay returns `continue: true` and Codex CLI
+compacts normally. Manual `/compact`, inactive/terminal Goals, malformed input,
+missing settings, open circuit breakers, unsupported roots, and other failures
+are fail-open paths.
 
 `UserPromptSubmit` and `PreToolUse` never launch. They only guard an already
 acknowledged predecessor; Goal control, cancellation, stop, and shutdown bypass
@@ -39,13 +41,19 @@ one atomic state record under `.omx/state/relay/` plus a worker outcome record.
 Repeated no-progress or launch failures open Relay's circuit for that chain.
 The Goal is not marked blocked; future automatic compaction remains native.
 
-## Surface boundary
+## CLI contract
 
-Relay has no supported way to present an externally created thread in the
-already-running Desktop app, so ordinary app-server/Desktop sources fail open
-before `thread/start`. CLI/exec and app-server-created threads are headless
-paths; current Desktop (`source: vscode`) is not. This is not supported Desktop
-presentation.
+User-originated roots are admitted only when their persisted session source is
+`cli` (interactive Codex CLI) or `exec` (`codex exec`). Any other or missing
+source fails open without creating Relay state or a destination.
+
+Relay-owned successors are admitted through their durable Relay parent record,
+so their next handoff does not depend on the source label attached to an
+internally created thread.
+
+Relay uses the local `codex app-server --stdio` protocol internally to inspect
+Goals, create fresh threads, restore settings, and verify continuation turns.
+That implementation transport is not a separate supported user-facing mode.
 
 ## Compatibility and state
 
@@ -53,9 +61,8 @@ Relay requires Python 3.10 or newer. The hook checks the interpreter and emits
 an actionable diagnostic before failing open when no supported interpreter is
 available; set `RELAY_PYTHON` when `python3` is not the intended executable.
 
-The v0.6.0 release checks used Codex CLI 0.149.1 for clean installation and
-hook-contract validation. Other Codex versions are unverified, and Desktop
-presentation is unsupported as described above.
+The v0.7.0 release checks use Codex CLI 0.150.1 for clean installation and
+hook-contract validation. Other Codex versions are unverified.
 
 Relay stores bounded local handoff metadata and worker outcomes under
 `.omx/state/relay/`; it does not store full transcripts. The directory is

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0 - Unreleased
+
+- Narrowed Relay's supported product surface to interactive Codex CLI and
+  `codex exec`; unsupported roots now fail open generically.
+- Removed the source/presentation compatibility path and retained local
+  app-server stdio only as the internal continuation mechanism.
+- Added coverage for `exec` roots, generic unsupported roots, and Relay-owned
+  successors whose internal source metadata is not a user-originated source.
+
+## 0.6.1 - 2026-08-30
+
+- Prevented Relay-generated continuation prompts from recursively becoming the
+  next current request, while preserving the original request across a chain.
+- Made no-progress detection follow repository state instead of volatile
+  assistant prose, so tight compaction thresholds fail open instead of looping.
+- Added regression coverage for recursive prompt and repeated-transition safety.
+
 ## 0.6.0 - 2026-08-27
 
 - Added explicit Python 3.10+ hook detection with an actionable fail-open diagnostic,

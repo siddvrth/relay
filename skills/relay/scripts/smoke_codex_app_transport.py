@@ -143,8 +143,6 @@ def _exec_seed(
             "--json",
             "--cd",
             str(repo),
-            "--thread-source",
-            "cli",
             "--model",
             _smoke_model(),
             "--sandbox",

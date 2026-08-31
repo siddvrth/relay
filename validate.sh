@@ -9,7 +9,19 @@ PYCACHE="${TMPDIR:-/tmp}/relay-pycache-$$"
 INSTALL_ROOT="${TMPDIR:-/tmp}/relay-marketplace-$$"
 CODEX_HOME_TEST="${TMPDIR:-/tmp}/relay-codex-home-$$"
 SMOKE_REPO="${TMPDIR:-/tmp}/relay-install-smoke-$$"
-trap 'rm -rf "$PYCACHE" "$INSTALL_ROOT" "$CODEX_HOME_TEST" "$SMOKE_REPO"' EXIT
+cleanup_validation_tmp() {
+  for path in "$PYCACHE" "$INSTALL_ROOT" "$CODEX_HOME_TEST" "$SMOKE_REPO"; do
+    [[ -e "$path" ]] || continue
+    if trash_bin="$(command -v trash 2>/dev/null)"; then
+      "$trash_bin" "$path" >/dev/null 2>&1 || true
+    elif gio_bin="$(command -v gio 2>/dev/null)"; then
+      "$gio_bin" trash "$path" >/dev/null 2>&1 || true
+    else
+      echo "validation temporary directory retained (no Trash utility): $path" >&2
+    fi
+  done
+}
+trap cleanup_validation_tmp EXIT
 export PYTHONPYCACHEPREFIX="$PYCACHE"
 
 PYTHONS=()
@@ -112,7 +124,7 @@ fi
 if [[ "${RELAY_RUN_REAL_SMOKE:-0}" == "1" ]]; then
   "$VALIDATION_PYTHON" "$SKILL/smoke_codex_app_transport.py"
 else
-  echo "real local app-server smoke: SKIPPED (set RELAY_RUN_REAL_SMOKE=1)"
+  echo "real authenticated Codex CLI A-to-B-to-C smoke: SKIPPED (set RELAY_RUN_REAL_SMOKE=1)"
 fi
 
 echo "=== all checks passed ==="

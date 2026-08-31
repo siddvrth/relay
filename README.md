@@ -1,12 +1,15 @@
 # Relay
 
-Relay is an experimental fresh-thread alternative to automatic compaction for
-long-running Codex Goals. When Codex reaches `PreCompact` with `trigger: auto`,
-Relay attempts a genuinely fresh `thread/start` continuation. It stops the
-source compaction only after the destination Goal is restored, the explicit
-continuation turn is observed as started, and the destination IDs are bound to
-durable Relay state. If any required step fails, Relay returns control and
-Codex compacts normally.
+Relay is an experimental Codex CLI plugin that replaces automatic compaction at
+`PreCompact(auto)` with a verified fresh CLI continuation when possible;
+otherwise native compaction proceeds normally.
+
+When Codex CLI reaches `PreCompact` with `trigger: auto`, Relay attempts a
+genuinely fresh `thread/start` continuation. It stops source compaction only
+after the destination Goal is restored, the explicit continuation turn is
+observed as started, and the destination IDs are bound to durable Relay state.
+If any required step fails, Relay returns control and Codex CLI compacts
+normally.
 
 Explicit manual `/compact` is never matched. It remains the user's same-thread
 escape hatch.
@@ -32,19 +35,20 @@ copy the transcript.
   worker cleanup is process-group scoped, and repeated failures open Relay's
   circuit without blocking the Goal or native compaction.
 
-## Desktop boundary
+## CLI contract
 
-Current Codex app-server exposes no supported Desktop present/select/focus RPC,
-and an already-running Desktop does not reliably reconcile threads created by a
-separate app-server client. The current Desktop source is `vscode`, so Relay
-treats `vscode` and unknown host sources as requiring presentation and fails
-open before creating a destination.
-It does not use deep links, UI automation, internal IPC, synthetic presenters,
-or application restarts.
+Relay admits a user-originated root only when its persisted session source is
+`cli` (interactive Codex CLI) or `exec` (`codex exec`). Missing or other source
+values fail open without creating Relay state or a destination.
 
-CLI/exec and explicitly app-server-created threads are headless paths. Other
-host surfaces remain native-compaction-only until Codex exposes a supported
-presentation acknowledgement.
+After a verified handoff, the destination is Relay-owned. Its next handoff is
+admitted from the durable Relay parent record, independent of whatever source
+label Codex gives that internally created thread.
+
+Relay invokes the local `codex app-server --stdio` protocol only as the internal
+mechanism for reading Goals, creating and verifying fresh threads, and starting
+continuation turns. Running an app-server client separately is not a supported
+Relay user-facing mode.
 
 ## Compatibility
 
@@ -53,12 +57,9 @@ runs and reports an actionable diagnostic before failing open if no supported
 interpreter is available. Set `RELAY_PYTHON` to the path of a supported Python
 executable when `python3` is not the right interpreter.
 
-The v0.6.0 release checks used Codex CLI 0.149.1 for clean plugin installation
-and hook-contract validation. CLI/exec and explicitly app-server-created
-threads are the supported headless paths. Codex Desktop is not supported in
-this release: its current `vscode` source fails open to native compaction
-because Relay has no supported presentation acknowledgement. Other Codex
-versions are unverified.
+The v0.7.0 release checks use Codex CLI 0.150.1 for clean plugin installation,
+hook-contract validation, and interactive CLI plus `codex exec` continuation.
+Other Codex versions are unverified.
 
 ## Local state and deletion
 
@@ -84,8 +85,9 @@ python3 skills/relay/scripts/test_relay.py
 bash validate.sh
 ```
 
-The authenticated isolated-home smoke proves a real A → B → C chain, real work
-in B, Goal/settings preservation, worker cleanup, and duplicate suppression:
+The authenticated isolated-home smoke proves a real Codex CLI A → B → C chain,
+real work in B, Goal/settings preservation, worker cleanup, and duplicate
+suppression:
 
 ```bash
 python3 skills/relay/scripts/smoke_codex_app_transport.py

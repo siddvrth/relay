@@ -14,7 +14,7 @@ Relay is small on purpose. Contributions should preserve that shape.
 
 ```bash
 bash validate.sh
-rg -n -i 'private-project-name|/Users/.+/Desktop|secret|token|api[_-]?key' .
+rg -n -i 'private-project-name|/Users/.+/(private-path|private-project)|secret|token|api[_-]?key' .
 ```
 
 ## Documentation Rules

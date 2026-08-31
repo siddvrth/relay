@@ -14,5 +14,8 @@ __pycache__/
 # Ephemeral host evidence
 artifacts/metrics/live-hooks-trust.json
 
+# Continuity benchmark output (fixtures/harness source remain reviewable)
+benchmarks/continuity/results/
+
 # OS/editor noise
 .DS_Store

@@ -39,6 +39,9 @@ MAX_PROGRESS_CHARS = 2400
 DEFAULT_NO_PROGRESS_LIMIT = 3
 DEFAULT_FAILURE_LIMIT = 3
 MAX_TITLE_CHARS = 240
+CONTINUATION_HEADER = "Relay continuation in a genuinely fresh Codex thread."
+CURRENT_REQUEST_PREFIX = "Current user request (JSON): "
+CLI_ROOT_SOURCES = frozenset({"cli", "exec"})
 TERMINAL_EVENTS = {"SessionEnd"}
 CONTROL_TOOL_NAMES = {
     "goal",
@@ -296,7 +299,7 @@ def handle_hook(
                     _write_state(state_path, terminal_state)
                 return _allow(event)
             if (
-                _surface_requires_presentation(goal)
+                not _is_supported_cli_root(goal)
                 and _find_parent_state(repo, session_id) is None
             ):
                 return _allow(event)
@@ -316,10 +319,11 @@ def handle_hook(
             request = _request(payload) or _string_value(handoff.get("current_request"))
             files = _changed_files(repo)
             progress = handoff.get("recent_progress")
+            repository_fingerprint = _repository_fingerprint(repo)
             progress_fingerprint = _progress_fingerprint(
                 goal=goal,
                 files=files,
-                progress=progress if isinstance(progress, str) else None,
+                repository_fingerprint=repository_fingerprint,
             )
             no_progress_count = _record_chain_progress(
                 repo,
@@ -636,7 +640,7 @@ def _continuation(
     original_title: str,
 ) -> str:
     lines = [
-        "Relay continuation in a genuinely fresh Codex thread.",
+        CONTINUATION_HEADER,
         "Do not rely on the predecessor transcript and do not use thread/fork.",
         f"Goal objective: {objective}",
         f"Relay chain: {chain_id}",
@@ -644,7 +648,10 @@ def _continuation(
         f"Original title: {original_title}",
     ]
     if request and request != objective:
-        lines.append(f"Current user request: {request}")
+        lines.append(
+            CURRENT_REQUEST_PREFIX
+            + json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+        )
     if progress:
         lines.extend(
             [
@@ -690,7 +697,11 @@ def _handoff_context(payload: Mapping[str, Any]) -> dict[str, Any]:
                     if not text:
                         continue
                     if item.get("type") == "message" and item.get("role") == "user":
-                        latest_request = text
+                        carried_request = _continuation_request(text)
+                        if carried_request is None and not _is_continuation(text):
+                            latest_request = text
+                        elif carried_request is not None:
+                            latest_request = carried_request
                     elif item.get("role") == "assistant":
                         messages.append(text)
     except OSError:
@@ -798,13 +809,8 @@ def _normalize_sandbox(value: Mapping[str, Any]) -> tuple[str, dict[str, object]
     return mapped[0], policy
 
 
-def _surface_requires_presentation(goal: GoalSnapshot) -> bool:
-    """Fail open when the creating app-server client cannot present a successor."""
-
-    return not (
-        goal.source in {"cli", "exec", "appServer"}
-        or (isinstance(goal.source, str) and goal.source.startswith("custom:relay"))
-    )
+def _is_supported_cli_root(goal: GoalSnapshot) -> bool:
+    return goal.source in CLI_ROOT_SOURCES
 
 
 def _resolve_chain(
@@ -1233,19 +1239,97 @@ def _progress_fingerprint(
     *,
     goal: GoalSnapshot,
     files: str,
-    progress: str | None,
+    repository_fingerprint: str,
 ) -> str:
     value = json.dumps(
         {
             "objective": goal.objective,
             "status": goal.status,
             "changed_files": files,
-            "recent_progress": progress or "",
+            "repository": repository_fingerprint,
         },
         sort_keys=True,
         separators=(",", ":"),
     )
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _repository_fingerprint(repo: Path) -> str:
+    """Capture stable repository progress without trusting model prose."""
+
+    digest = hashlib.sha256()
+    status = subprocess.run(
+        [
+            "git",
+            "status",
+            "--porcelain=v2",
+            "--untracked-files=all",
+            "-z",
+            "--",
+            ".",
+            ":(exclude).omx/state/relay/**",
+        ],
+        cwd=repo,
+        capture_output=True,
+        timeout=2,
+        check=False,
+    )
+    if status.returncode != 0:
+        return "unavailable"
+    digest.update(status.stdout)
+    names = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "--modified",
+            "--deleted",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            ".",
+            ":(exclude).omx/state/relay/**",
+        ],
+        cwd=repo,
+        capture_output=True,
+        timeout=2,
+        check=False,
+    )
+    if names.returncode != 0:
+        return hashlib.sha256(status.stdout).hexdigest()
+    for raw_path in sorted(filter(None, names.stdout.split(b"\0"))):
+        try:
+            path = repo / os.fsdecode(raw_path)
+            metadata = path.lstat()
+        except (OSError, ValueError):
+            continue
+        digest.update(raw_path)
+        digest.update(
+            f"{metadata.st_mode}:{metadata.st_size}:{metadata.st_mtime_ns}".encode()
+        )
+    return digest.hexdigest()
+
+
+def _is_continuation(value: str) -> bool:
+    return (
+        value.startswith(CONTINUATION_HEADER + "\n")
+        and "\nRelay chain: " in value
+        and "\nRelay sequence: " in value
+    )
+
+
+def _continuation_request(value: str) -> str | None:
+    if not _is_continuation(value):
+        return None
+    for line in value.splitlines():
+        if not line.startswith(CURRENT_REQUEST_PREFIX):
+            continue
+        try:
+            request = json.loads(line[len(CURRENT_REQUEST_PREFIX) :])
+        except json.JSONDecodeError:
+            return None
+        return _bounded(request, MAX_REQUEST_CHARS) if isinstance(request, str) else None
+    return None
 
 
 def _no_progress_limit() -> int:
@@ -1633,7 +1717,6 @@ def _state_files(repo: Path) -> list[Path]:
         for path in paths
         if not path.name.startswith("chain-")
         and not path.name.endswith(".outcome.json")
-        and not path.name.endswith(".presentation.json")
     ]
 
 
